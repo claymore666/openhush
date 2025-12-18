@@ -1,0 +1,33 @@
+# Rust
+/target/
+Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Models (large files)
+models/
+*.bin
+*.pt
+*.onnx
+
+# Build artifacts
+*.so
+*.dylib
+*.dll
+
+# Logs
+*.log
+logs/
+
+# Config with secrets
+config.toml
+!config.example.toml

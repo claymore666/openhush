@@ -1,0 +1,106 @@
+name: Requirement
+description: New feature requirement or enhancement
+title: "[REQ] "
+labels: ["requirement", "triage"]
+body:
+  - type: input
+    id: req-id
+    attributes:
+      label: Requirement ID
+      description: Unique identifier (e.g., F14, P08, C11)
+      placeholder: "F14"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      description: MoSCoW priority
+      options:
+        - Must
+        - Should
+        - Could
+        - Won't (this release)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      options:
+        - Core Feature (F)
+        - Platform Support (P)
+        - Configuration (C)
+        - Distribution (D)
+        - Non-Functional (NF)
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: Clear description of the requirement
+      placeholder: |
+        What should this feature do?
+        Why is it needed?
+    validations:
+      required: true
+
+  - type: textarea
+    id: user-story
+    attributes:
+      label: User Story
+      description: Optional user story format
+      placeholder: |
+        As a [type of user],
+        I want [goal],
+        so that [reason].
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      description: How do we know this is done?
+      placeholder: |
+        - [ ] Criterion 1
+        - [ ] Criterion 2
+        - [ ] Criterion 3
+    validations:
+      required: true
+
+  - type: textarea
+    id: test-cases
+    attributes:
+      label: Test Cases
+      description: Include happy path AND edge cases
+      placeholder: |
+        ### Happy Path
+        - Test case 1: ...
+        - Test case 2: ...
+
+        ### Edge Cases
+        - Empty input: ...
+        - Large input: ...
+        - Error conditions: ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: Other requirement IDs this depends on
+      placeholder: "F01, F02"
+
+  - type: textarea
+    id: technical-notes
+    attributes:
+      label: Technical Notes
+      description: Implementation hints, affected files, API changes
+      placeholder: |
+        - Affects: src/daemon.rs, src/config.rs
+        - New dependency: xyz
+        - Breaking change: No

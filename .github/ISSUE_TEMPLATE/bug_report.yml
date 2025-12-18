@@ -1,0 +1,73 @@
+name: Bug Report
+description: Report a bug or unexpected behavior
+title: "[BUG] "
+labels: ["bug", "triage"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: Clear description of the bug
+      placeholder: What happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What should have happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: How can we reproduce this?
+      placeholder: |
+        1. Start daemon with `openhush start`
+        2. Press hotkey
+        3. ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Linux (X11)
+        - Linux (Wayland)
+        - Linux (TTY)
+        - macOS
+        - Windows
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `openhush --version`
+      placeholder: "0.1.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Additional environment details
+      placeholder: |
+        - OS: Ubuntu 24.04
+        - Desktop: KDE Plasma 6
+        - GPU: NVIDIA RTX 3090
+        - Whisper model: large-v3
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant log output (run with `-v` for verbose)
+      render: shell
