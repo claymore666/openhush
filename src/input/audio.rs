@@ -12,8 +12,8 @@ use tracing::{debug, error, info, warn};
 /// Target sample rate for Whisper (16kHz)
 pub const SAMPLE_RATE: u32 = 16000;
 
-/// Minimum recording duration in seconds
-pub const MIN_DURATION_SECS: f32 = 0.5;
+/// Minimum recording duration in seconds (filters accidental taps)
+pub const MIN_DURATION_SECS: f32 = 0.1;
 
 /// Minimum audio duration for Whisper (1000ms)
 /// Audio shorter than this will be padded with silence
@@ -333,13 +333,13 @@ mod tests {
     #[test]
     fn test_audio_buffer_validity() {
         let short_buffer = AudioBuffer {
-            samples: vec![0.0; 4000], // 0.25s at 16kHz
+            samples: vec![0.0; 800], // 0.05s at 16kHz (below 0.1s minimum)
             sample_rate: 16000,
         };
         assert!(!short_buffer.is_valid());
 
         let valid_buffer = AudioBuffer {
-            samples: vec![0.0; 16000], // 1s at 16kHz
+            samples: vec![0.0; 1600], // 0.1s at 16kHz (exactly at minimum)
             sample_rate: 16000,
         };
         assert!(valid_buffer.is_valid());
