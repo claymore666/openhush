@@ -15,6 +15,10 @@ pub const SAMPLE_RATE: u32 = 16000;
 /// Minimum recording duration in seconds
 pub const MIN_DURATION_SECS: f32 = 0.5;
 
+/// Minimum audio duration for Whisper (1000ms)
+/// Audio shorter than this will be padded with silence
+pub const WHISPER_MIN_DURATION_SECS: f32 = 1.0;
+
 #[derive(Error, Debug)]
 pub enum AudioRecorderError {
     #[error("No audio input device found")]
@@ -204,7 +208,7 @@ impl AudioRecorder {
             samples
         };
 
-        let buffer = AudioBuffer {
+        let mut buffer = AudioBuffer {
             samples: resampled,
             sample_rate: SAMPLE_RATE,
         };
@@ -216,6 +220,18 @@ impl AudioRecorder {
                 MIN_DURATION_SECS
             );
             return Err(AudioRecorderError::TooShort);
+        }
+
+        // Pad with silence if shorter than Whisper's minimum (1000ms)
+        if buffer.duration_secs() < WHISPER_MIN_DURATION_SECS {
+            let samples_needed = (SAMPLE_RATE as f32 * WHISPER_MIN_DURATION_SECS) as usize;
+            let padding = samples_needed - buffer.samples.len();
+            debug!(
+                "Padding audio with {} samples of silence ({:.0}ms)",
+                padding,
+                padding as f32 / SAMPLE_RATE as f32 * 1000.0
+            );
+            buffer.samples.extend(vec![0.0f32; padding]);
         }
 
         info!(
