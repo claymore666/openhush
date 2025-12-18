@@ -25,7 +25,9 @@ impl Default for MacOSPlatform {
 impl HotkeyHandler for MacOSPlatform {
     fn start(&mut self, _key: &str) -> Result<(), PlatformError> {
         // TODO: Implement using rdev or CGEvent
-        Err(PlatformError::NotSupported("macOS hotkeys not yet implemented".into()))
+        Err(PlatformError::NotSupported(
+            "macOS hotkeys not yet implemented".into(),
+        ))
     }
 
     fn stop(&mut self) -> Result<(), PlatformError> {
@@ -40,19 +42,25 @@ impl HotkeyHandler for MacOSPlatform {
 impl TextOutput for MacOSPlatform {
     fn copy_to_clipboard(&self, _text: &str) -> Result<(), PlatformError> {
         // TODO: Implement using arboard
-        Err(PlatformError::NotSupported("macOS clipboard not yet implemented".into()))
+        Err(PlatformError::NotSupported(
+            "macOS clipboard not yet implemented".into(),
+        ))
     }
 
     fn paste_text(&self, _text: &str) -> Result<(), PlatformError> {
         // TODO: Implement using enigo (CGEvent)
-        Err(PlatformError::NotSupported("macOS paste not yet implemented".into()))
+        Err(PlatformError::NotSupported(
+            "macOS paste not yet implemented".into(),
+        ))
     }
 }
 
 impl Notifier for MacOSPlatform {
     fn notify(&self, _title: &str, _body: &str) -> Result<(), PlatformError> {
         // TODO: Implement using notify-rust or osascript
-        Err(PlatformError::NotSupported("macOS notifications not yet implemented".into()))
+        Err(PlatformError::NotSupported(
+            "macOS notifications not yet implemented".into(),
+        ))
     }
 }
 

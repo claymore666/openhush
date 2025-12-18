@@ -50,6 +50,10 @@ enum Commands {
         #[arg(long)]
         language: Option<String>,
 
+        /// Enable translation to English (use --translate or --no-translate)
+        #[arg(long, action = clap::ArgAction::Set)]
+        translate: Option<bool>,
+
         /// Enable/disable LLM correction
         #[arg(long)]
         llm: Option<String>,
@@ -131,13 +135,14 @@ async fn main() -> anyhow::Result<()> {
             hotkey,
             model,
             language,
+            translate,
             llm,
             show,
         } => {
             if show {
                 config::show()?;
             } else {
-                config::update(hotkey, model, language, llm)?;
+                config::update(hotkey, model, language, translate, llm)?;
             }
         }
 

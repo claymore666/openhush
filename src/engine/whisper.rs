@@ -97,11 +97,15 @@ impl WhisperModel {
 pub struct WhisperEngine {
     ctx: WhisperContext,
     language: String,
+    translate: bool,
 }
 
 impl WhisperEngine {
     /// Create a new Whisper engine, loading the model from disk
-    pub fn new(model_path: &Path, language: &str) -> Result<Self, WhisperError> {
+    ///
+    /// If `translate` is true, all audio will be translated to English.
+    /// If false, audio will be transcribed in its original language.
+    pub fn new(model_path: &Path, language: &str, translate: bool) -> Result<Self, WhisperError> {
         info!("Loading Whisper model from: {}", model_path.display());
 
         if !model_path.exists() {
@@ -121,32 +125,33 @@ impl WhisperEngine {
 
         let params = WhisperContextParameters::default();
 
-        let ctx = WhisperContext::new_with_params(
-            model_path.to_str().unwrap_or_default(),
-            params,
-        )
-        .map_err(|e| WhisperError::LoadFailed(format!("{:?}", e)))?;
+        let ctx = WhisperContext::new_with_params(model_path.to_str().unwrap_or_default(), params)
+            .map_err(|e| WhisperError::LoadFailed(format!("{:?}", e)))?;
 
         info!("Whisper model loaded successfully");
 
         Ok(Self {
             ctx,
             language: language.to_string(),
+            translate,
         })
     }
 
     /// Load engine from config
     #[allow(dead_code)]
     pub fn from_config(config: &Config) -> Result<Self, WhisperError> {
-        let data_dir = Config::data_dir()
-            .map_err(|e| WhisperError::LoadFailed(e.to_string()))?;
+        let data_dir = Config::data_dir().map_err(|e| WhisperError::LoadFailed(e.to_string()))?;
 
-        let model = WhisperModel::from_str(&config.transcription.model)
-            .unwrap_or(WhisperModel::Base);
+        let model =
+            WhisperModel::from_str(&config.transcription.model).unwrap_or(WhisperModel::Base);
 
         let model_path = data_dir.join("models").join(model.filename());
 
-        Self::new(&model_path, &config.transcription.language)
+        Self::new(
+            &model_path,
+            &config.transcription.language,
+            config.transcription.translate,
+        )
     }
 
     /// Transcribe audio buffer to text
@@ -177,6 +182,10 @@ impl WhisperEngine {
             params.set_language(Some(&self.language));
         }
 
+        // Set translate mode (true = translate to English, false = transcribe in original language)
+        debug!("Setting translate={}", self.translate);
+        params.set_translate(self.translate);
+
         // Disable printing to avoid cluttering output
         params.set_print_special(false);
         params.set_print_progress(false);
@@ -189,7 +198,8 @@ impl WhisperEngine {
             .map_err(|e| WhisperError::TranscriptionFailed(format!("{:?}", e)))?;
 
         // Collect results
-        let num_segments = state.full_n_segments()
+        let num_segments = state
+            .full_n_segments()
             .map_err(|e| WhisperError::TranscriptionFailed(format!("{:?}", e)))?;
 
         let mut text = String::new();
@@ -230,8 +240,7 @@ impl WhisperEngine {
 /// Get the model directory path
 #[allow(dead_code)]
 pub fn models_dir() -> Result<PathBuf, WhisperError> {
-    let data_dir = Config::data_dir()
-        .map_err(|e| WhisperError::LoadFailed(e.to_string()))?;
+    let data_dir = Config::data_dir().map_err(|e| WhisperError::LoadFailed(e.to_string()))?;
     Ok(data_dir.join("models"))
 }
 
@@ -270,7 +279,10 @@ mod tests {
     #[test]
     fn test_model_from_str() {
         assert_eq!(WhisperModel::from_str("tiny"), Some(WhisperModel::Tiny));
-        assert_eq!(WhisperModel::from_str("LARGE-V3"), Some(WhisperModel::LargeV3));
+        assert_eq!(
+            WhisperModel::from_str("LARGE-V3"),
+            Some(WhisperModel::LargeV3)
+        );
         assert_eq!(WhisperModel::from_str("invalid"), None);
     }
 

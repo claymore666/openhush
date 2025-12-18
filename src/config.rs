@@ -68,6 +68,10 @@ pub struct TranscriptionConfig {
     /// Device: "cuda" or "cpu"
     #[serde(default = "default_device")]
     pub device: String,
+
+    /// Translate to English (instead of transcribing in original language)
+    #[serde(default)]
+    pub translate: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -166,7 +170,6 @@ fn default_true() -> bool {
     true
 }
 
-
 impl Default for HotkeyConfig {
     fn default() -> Self {
         Self {
@@ -182,6 +185,7 @@ impl Default for TranscriptionConfig {
             model: default_model(),
             language: default_language(),
             device: default_device(),
+            translate: false,
         }
     }
 }
@@ -300,6 +304,7 @@ pub fn update(
     hotkey: Option<String>,
     model: Option<String>,
     language: Option<String>,
+    translate: Option<bool>,
     llm: Option<String>,
 ) -> anyhow::Result<()> {
     let mut config = Config::load()?;
@@ -320,6 +325,11 @@ pub fn update(
         changed = true;
     }
 
+    if let Some(trans) = translate {
+        config.transcription.translate = trans;
+        changed = true;
+    }
+
     if let Some(llm_config) = llm {
         if llm_config == "off" || llm_config == "false" {
             config.correction.enabled = false;
@@ -327,7 +337,8 @@ pub fn update(
             config.correction.enabled = true;
             // Parse "ollama:model_name" format
             if llm_config.starts_with("ollama:") {
-                config.correction.ollama_model = llm_config.strip_prefix("ollama:").unwrap().to_string();
+                config.correction.ollama_model =
+                    llm_config.strip_prefix("ollama:").unwrap().to_string();
             }
         }
         changed = true;

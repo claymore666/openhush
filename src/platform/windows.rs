@@ -25,7 +25,9 @@ impl Default for WindowsPlatform {
 impl HotkeyHandler for WindowsPlatform {
     fn start(&mut self, _key: &str) -> Result<(), PlatformError> {
         // TODO: Implement using rdev or RegisterHotKey
-        Err(PlatformError::NotSupported("Windows hotkeys not yet implemented".into()))
+        Err(PlatformError::NotSupported(
+            "Windows hotkeys not yet implemented".into(),
+        ))
     }
 
     fn stop(&mut self) -> Result<(), PlatformError> {
@@ -40,19 +42,25 @@ impl HotkeyHandler for WindowsPlatform {
 impl TextOutput for WindowsPlatform {
     fn copy_to_clipboard(&self, _text: &str) -> Result<(), PlatformError> {
         // TODO: Implement using arboard
-        Err(PlatformError::NotSupported("Windows clipboard not yet implemented".into()))
+        Err(PlatformError::NotSupported(
+            "Windows clipboard not yet implemented".into(),
+        ))
     }
 
     fn paste_text(&self, _text: &str) -> Result<(), PlatformError> {
         // TODO: Implement using enigo (SendInput)
-        Err(PlatformError::NotSupported("Windows paste not yet implemented".into()))
+        Err(PlatformError::NotSupported(
+            "Windows paste not yet implemented".into(),
+        ))
     }
 }
 
 impl Notifier for WindowsPlatform {
     fn notify(&self, _title: &str, _body: &str) -> Result<(), PlatformError> {
         // TODO: Implement using notify-rust or winrt-toast
-        Err(PlatformError::NotSupported("Windows notifications not yet implemented".into()))
+        Err(PlatformError::NotSupported(
+            "Windows notifications not yet implemented".into(),
+        ))
     }
 }
 

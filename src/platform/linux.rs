@@ -17,9 +17,7 @@ impl LinuxPlatform {
     pub fn new() -> Result<Self, PlatformError> {
         let display_server = DisplayServer::detect();
 
-        let clipboard = Clipboard::new()
-            .map(Some)
-            .unwrap_or_else(|_| None);
+        let clipboard = Clipboard::new().map(Some).unwrap_or_else(|_| None);
 
         Ok(Self {
             display_server,
@@ -32,12 +30,7 @@ impl LinuxPlatform {
         Command::new("wtype")
             .arg(text)
             .status()
-            .map_err(|e| {
-                PlatformError::Paste(format!(
-                    "wtype failed (is it installed?): {}",
-                    e
-                ))
-            })?;
+            .map_err(|e| PlatformError::Paste(format!("wtype failed (is it installed?): {}", e)))?;
         Ok(())
     }
 
@@ -50,10 +43,7 @@ impl LinuxPlatform {
             .args(["key", "--clearmodifiers", "ctrl+v"])
             .status()
             .map_err(|e| {
-                PlatformError::Paste(format!(
-                    "xdotool failed (is it installed?): {}",
-                    e
-                ))
+                PlatformError::Paste(format!("xdotool failed (is it installed?): {}", e))
             })?;
         Ok(())
     }
@@ -109,9 +99,7 @@ impl TextOutput for LinuxPlatform {
             DisplayServer::Wayland => self.paste_wayland(text),
             DisplayServer::X11 => self.paste_x11(text),
             DisplayServer::Tty => self.paste_tty(text),
-            _ => Err(PlatformError::NotSupported(
-                "Unknown display server".into(),
-            )),
+            _ => Err(PlatformError::NotSupported("Unknown display server".into())),
         }
     }
 }

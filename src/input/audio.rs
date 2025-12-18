@@ -124,11 +124,7 @@ impl AudioRecorder {
     pub fn list_devices() -> Vec<String> {
         let host = cpal::default_host();
         host.input_devices()
-            .map(|devices| {
-                devices
-                    .filter_map(|d| d.name().ok())
-                    .collect()
-            })
+            .map(|devices| devices.filter_map(|d| d.name().ok()).collect())
             .unwrap_or_default()
     }
 
@@ -257,8 +253,8 @@ fn resample(samples: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
         let frac = src_idx - src_idx_floor as f64;
 
         // Linear interpolation
-        let sample = samples[src_idx_floor] * (1.0 - frac as f32)
-            + samples[src_idx_ceil] * frac as f32;
+        let sample =
+            samples[src_idx_floor] * (1.0 - frac as f32) + samples[src_idx_ceil] * frac as f32;
         result.push(sample);
     }
 

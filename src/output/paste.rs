@@ -50,8 +50,8 @@ pub fn paste_text_with_method(text: &str, method: PasteMethod) -> Result<(), Pas
 
 /// Type text character by character
 fn paste_by_typing(text: &str) -> Result<(), PasteError> {
-    let mut enigo = Enigo::new(&Settings::default())
-        .map_err(|e| PasteError::InitFailed(format!("{:?}", e)))?;
+    let mut enigo =
+        Enigo::new(&Settings::default()).map_err(|e| PasteError::InitFailed(format!("{:?}", e)))?;
 
     debug!("Typing {} characters", text.len());
 
@@ -72,8 +72,8 @@ fn paste_by_typing(text: &str) -> Result<(), PasteError> {
 fn paste_by_ctrl_v() -> Result<(), PasteError> {
     use enigo::Key;
 
-    let mut enigo = Enigo::new(&Settings::default())
-        .map_err(|e| PasteError::InitFailed(format!("{:?}", e)))?;
+    let mut enigo =
+        Enigo::new(&Settings::default()).map_err(|e| PasteError::InitFailed(format!("{:?}", e)))?;
 
     // Small delay before pasting
     thread::sleep(Duration::from_millis(50));

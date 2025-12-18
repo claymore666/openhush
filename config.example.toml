@@ -22,6 +22,10 @@ language = "auto"
 # Device: "cuda" for GPU acceleration, "cpu" for CPU only
 device = "cuda"
 
+# Translate to English: false = transcribe in original language, true = translate to English
+# Note: Whisper can only translate TO English, not other languages
+translate = false
+
 # Output settings
 [output]
 # Copy transcription to clipboard

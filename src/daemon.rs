@@ -108,8 +108,15 @@ impl Daemon {
         }
 
         info!("Loading Whisper model...");
-        let engine = WhisperEngine::new(&model_path, &self.config.transcription.language)?;
-        info!("Model loaded successfully");
+        let engine = WhisperEngine::new(
+            &model_path,
+            &self.config.transcription.language,
+            self.config.transcription.translate,
+        )?;
+        info!(
+            "Model loaded successfully (translate={})",
+            self.config.transcription.translate
+        );
 
         // Initialize output handler
         let output_handler = OutputHandler::new(&self.config.output);
@@ -118,12 +125,13 @@ impl Daemon {
         let mut audio_recorder = AudioRecorder::new()?;
 
         // Initialize hotkey listener
-        let (hotkey_listener, mut hotkey_rx) =
-            HotkeyListener::new(&self.config.hotkey.key)?;
+        let (hotkey_listener, mut hotkey_rx) = HotkeyListener::new(&self.config.hotkey.key)?;
         hotkey_listener.start()?;
 
-        info!("Daemon running. Hold {} to record, release to transcribe.",
-              self.config.hotkey.key);
+        info!(
+            "Daemon running. Hold {} to record, release to transcribe.",
+            self.config.hotkey.key
+        );
 
         // Main event loop
         loop {
