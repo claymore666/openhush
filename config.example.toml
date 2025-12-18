@@ -14,7 +14,9 @@ mode = "push_to_talk"
 [transcription]
 # Whisper model: tiny, base, small, medium, large-v3
 # Larger models are more accurate but slower and use more memory
-model = "base"
+# Note: "small" is the recommended minimum for reliable multilingual support
+# The "base" model may incorrectly translate instead of transcribe with language=auto
+model = "small"
 
 # Language: "auto" for auto-detection, or ISO code (en, de, fr, etc.)
 language = "auto"

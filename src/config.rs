@@ -143,7 +143,7 @@ fn default_mode() -> String {
 }
 
 fn default_model() -> String {
-    "base".to_string()
+    "small".to_string() // "small" recommended for reliable multilingual support
 }
 
 fn default_language() -> String {
