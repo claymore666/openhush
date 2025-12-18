@@ -7,9 +7,9 @@
 //! 4. Queues recordings for transcription
 //! 5. Outputs text to clipboard and/or pastes at cursor
 
-use crate::config::Config;
+use crate::config::{AudioConfig, Config};
 use crate::engine::{WhisperEngine, WhisperError};
-use crate::input::{AudioRecorder, AudioRecorderError, HotkeyEvent, HotkeyListener};
+use crate::input::{AudioBuffer, AudioRecorder, AudioRecorderError, HotkeyEvent, HotkeyListener};
 use crate::output::{OutputError, OutputHandler};
 use crate::platform::{CurrentPlatform, Platform};
 use std::path::PathBuf;
@@ -76,6 +76,46 @@ impl Daemon {
         })
     }
 
+    /// Apply audio preprocessing (normalization, compression, limiter)
+    fn preprocess_audio(buffer: &mut AudioBuffer, audio_config: &AudioConfig) {
+        if !audio_config.preprocessing {
+            return;
+        }
+
+        let rms_before = buffer.rms_db();
+        debug!("Preprocessing audio (input RMS: {:.1} dB)", rms_before);
+
+        // 1. RMS Normalization
+        if audio_config.normalization.enabled {
+            buffer.normalize_rms(audio_config.normalization.target_db);
+        }
+
+        // 2. Dynamic Compression
+        if audio_config.compression.enabled {
+            buffer.compress(
+                audio_config.compression.threshold_db,
+                audio_config.compression.ratio,
+                audio_config.compression.attack_ms,
+                audio_config.compression.release_ms,
+                audio_config.compression.makeup_gain_db,
+            );
+        }
+
+        // 3. Limiter (safety net)
+        if audio_config.limiter.enabled {
+            buffer.limit(
+                audio_config.limiter.ceiling_db,
+                audio_config.limiter.release_ms,
+            );
+        }
+
+        let rms_after = buffer.rms_db();
+        info!(
+            "Audio preprocessed: {:.1} dB -> {:.1} dB",
+            rms_before, rms_after
+        );
+    }
+
     /// Get the path to the Whisper model file
     fn model_path(&self) -> Result<PathBuf, DaemonError> {
         let data_dir = Config::data_dir()?;
@@ -118,6 +158,15 @@ impl Daemon {
             self.config.transcription.translate
         );
 
+        if self.config.audio.preprocessing {
+            info!(
+                "Audio preprocessing enabled (normalize={}, compress={}, limit={})",
+                self.config.audio.normalization.enabled,
+                self.config.audio.compression.enabled,
+                self.config.audio.limiter.enabled
+            );
+        }
+
         // Initialize output handler
         let output_handler = OutputHandler::new(&self.config.output);
 
@@ -156,8 +205,11 @@ impl Daemon {
                                 self.state = DaemonState::Transcribing;
 
                                 match audio_recorder.stop() {
-                                    Ok(buffer) => {
+                                    Ok(mut buffer) => {
                                         info!("Recorded {:.2}s of audio", buffer.duration_secs());
+
+                                        // Apply preprocessing if enabled
+                                        Self::preprocess_audio(&mut buffer, &self.config.audio);
 
                                         // Transcribe
                                         match engine.transcribe(&buffer) {

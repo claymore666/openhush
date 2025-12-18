@@ -136,7 +136,7 @@ pub struct GpuConfig {
     pub devices: Vec<u32>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct AudioConfig {
     /// Enable/disable all preprocessing
     #[serde(default)]
@@ -340,17 +340,6 @@ impl Default for GpuConfig {
         Self {
             auto_detect: true,
             devices: vec![],
-        }
-    }
-}
-
-impl Default for AudioConfig {
-    fn default() -> Self {
-        Self {
-            preprocessing: false, // Disabled by default (opt-in)
-            normalization: NormalizationConfig::default(),
-            compression: CompressionConfig::default(),
-            limiter: LimiterConfig::default(),
         }
     }
 }

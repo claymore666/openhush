@@ -210,7 +210,8 @@ impl AudioBuffer {
             if target_gain < gain_reduction {
                 gain_reduction = target_gain; // Instant attack
             } else {
-                gain_reduction = release_coeff * gain_reduction + (1.0 - release_coeff) * target_gain;
+                gain_reduction =
+                    release_coeff * gain_reduction + (1.0 - release_coeff) * target_gain;
             }
 
             *sample *= gain_reduction;
@@ -509,5 +510,147 @@ mod tests {
         let samples: Vec<f32> = (0..100).map(|i| i as f32).collect();
         let result = resample(&samples, 48000, 16000);
         assert!(result.len() < samples.len());
+    }
+
+    #[test]
+    fn test_rms_db_silence() {
+        let buffer = AudioBuffer {
+            samples: vec![0.0; 16000],
+            sample_rate: 16000,
+        };
+        assert!(buffer.rms_db().is_infinite());
+    }
+
+    #[test]
+    fn test_rms_db_full_scale() {
+        // Full scale sine wave has RMS of 1/sqrt(2) ≈ 0.707, which is ~-3 dB
+        let samples: Vec<f32> = (0..16000)
+            .map(|i| (2.0 * std::f32::consts::PI * 440.0 * i as f32 / 16000.0).sin())
+            .collect();
+        let buffer = AudioBuffer {
+            samples,
+            sample_rate: 16000,
+        };
+        let rms = buffer.rms_db();
+        // RMS of sine wave is -3.01 dB
+        assert!((rms - (-3.01)).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_normalize_rms() {
+        // Create a quiet signal (approx -40 dB RMS)
+        let samples: Vec<f32> = (0..16000)
+            .map(|i| 0.01 * (2.0 * std::f32::consts::PI * 440.0 * i as f32 / 16000.0).sin())
+            .collect();
+        let mut buffer = AudioBuffer {
+            samples,
+            sample_rate: 16000,
+        };
+
+        let target_db = -18.0;
+        buffer.normalize_rms(target_db);
+
+        let rms_after = buffer.rms_db();
+        assert!((rms_after - target_db).abs() < 0.5);
+    }
+
+    #[test]
+    fn test_apply_gain() {
+        let mut buffer = AudioBuffer {
+            samples: vec![0.5, -0.5, 0.25, -0.25],
+            sample_rate: 16000,
+        };
+
+        // +6 dB doubles amplitude
+        buffer.apply_gain(6.02); // 20 * log10(2) ≈ 6.02 dB
+
+        assert!((buffer.samples[0] - 1.0).abs() < 0.01);
+        assert!((buffer.samples[1] - (-1.0)).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_compress_reduces_dynamic_range() {
+        // Create signal with loud and quiet parts
+        let mut samples = Vec::with_capacity(32000);
+        // First half: loud (0.8 amplitude)
+        for i in 0..16000 {
+            samples.push(0.8 * (2.0 * std::f32::consts::PI * 440.0 * i as f32 / 16000.0).sin());
+        }
+        // Second half: quiet (0.1 amplitude)
+        for i in 0..16000 {
+            samples.push(0.1 * (2.0 * std::f32::consts::PI * 440.0 * i as f32 / 16000.0).sin());
+        }
+
+        let mut buffer = AudioBuffer {
+            samples,
+            sample_rate: 16000,
+        };
+
+        // Get peak levels before compression
+        let loud_peak_before = buffer.samples[..16000]
+            .iter()
+            .map(|s| s.abs())
+            .fold(0.0_f32, f32::max);
+        let quiet_peak_before = buffer.samples[16000..]
+            .iter()
+            .map(|s| s.abs())
+            .fold(0.0_f32, f32::max);
+
+        // Compress with 4:1 ratio and makeup gain
+        buffer.compress(-20.0, 4.0, 5.0, 50.0, 0.0);
+
+        let loud_peak_after = buffer.samples[..16000]
+            .iter()
+            .map(|s| s.abs())
+            .fold(0.0_f32, f32::max);
+        let quiet_peak_after = buffer.samples[16000..]
+            .iter()
+            .map(|s| s.abs())
+            .fold(0.0_f32, f32::max);
+
+        // Loud section should be reduced
+        assert!(loud_peak_after < loud_peak_before);
+        // Dynamic range should be reduced (ratio of loud/quiet should be smaller)
+        let ratio_before = loud_peak_before / quiet_peak_before;
+        let ratio_after = loud_peak_after / quiet_peak_after;
+        assert!(ratio_after < ratio_before);
+    }
+
+    #[test]
+    fn test_limiter_prevents_clipping() {
+        // Create signal with peaks above 1.0
+        let mut buffer = AudioBuffer {
+            samples: vec![0.5, 1.5, -1.2, 0.8, 2.0, -0.3],
+            sample_rate: 16000,
+        };
+
+        // Limit to -1 dB (ceiling ≈ 0.89)
+        buffer.limit(-1.0, 50.0);
+
+        let ceiling = 10.0_f32.powf(-1.0 / 20.0); // ~0.89
+        for sample in &buffer.samples {
+            assert!(
+                sample.abs() <= ceiling + 0.01,
+                "Sample {} exceeds ceiling {}",
+                sample,
+                ceiling
+            );
+        }
+    }
+
+    #[test]
+    fn test_limiter_preserves_quiet_audio() {
+        let original = vec![0.1, -0.2, 0.15, -0.05];
+        let mut buffer = AudioBuffer {
+            samples: original.clone(),
+            sample_rate: 16000,
+        };
+
+        buffer.limit(-1.0, 50.0);
+
+        // Quiet audio should be unchanged
+        for (orig, processed) in original.iter().zip(buffer.samples.iter()) {
+            assert!((orig - processed).abs() < 0.001);
+        }
     }
 }
