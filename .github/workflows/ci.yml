@@ -116,33 +116,6 @@ jobs:
           path: target/release/openhush
 
   # ===================
-  # CUDA build (self-hosted runner with GPU)
-  # ===================
-
-  build-cuda:
-    name: Build (CUDA)
-    needs: [test]
-    runs-on: [self-hosted, linux, cuda]
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Check CUDA
-        run: nvidia-smi
-
-      - name: Build with CUDA
-        run: cargo build --release --features cuda
-
-      - name: Run CUDA tests
-        run: cargo test --release --features cuda
-
-      - name: Upload CUDA artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: openhush-x86_64-linux-cuda
-          path: target/release/openhush
-
-  # ===================
   # Documentation
   # ===================
 

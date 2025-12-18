@@ -29,6 +29,9 @@ pub struct Config {
     pub transcription: TranscriptionConfig,
 
     #[serde(default)]
+    pub audio: AudioConfig,
+
+    #[serde(default)]
     pub output: OutputConfig,
 
     #[serde(default)]
@@ -133,6 +136,78 @@ pub struct GpuConfig {
     pub devices: Vec<u32>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AudioConfig {
+    /// Enable/disable all preprocessing
+    #[serde(default)]
+    pub preprocessing: bool,
+
+    /// RMS normalization settings
+    #[serde(default)]
+    pub normalization: NormalizationConfig,
+
+    /// Dynamic compression settings
+    #[serde(default)]
+    pub compression: CompressionConfig,
+
+    /// Limiter settings
+    #[serde(default)]
+    pub limiter: LimiterConfig,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct NormalizationConfig {
+    /// Enable RMS normalization
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Target RMS level in dB (e.g., -18.0)
+    #[serde(default = "default_normalization_target")]
+    pub target_db: f32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CompressionConfig {
+    /// Enable dynamic compression
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Threshold level in dB where compression kicks in
+    #[serde(default = "default_compression_threshold")]
+    pub threshold_db: f32,
+
+    /// Compression ratio (e.g., 4.0 for 4:1)
+    #[serde(default = "default_compression_ratio")]
+    pub ratio: f32,
+
+    /// Attack time in milliseconds
+    #[serde(default = "default_compression_attack")]
+    pub attack_ms: f32,
+
+    /// Release time in milliseconds
+    #[serde(default = "default_compression_release")]
+    pub release_ms: f32,
+
+    /// Makeup gain in dB applied after compression
+    #[serde(default = "default_compression_makeup_gain")]
+    pub makeup_gain_db: f32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct LimiterConfig {
+    /// Enable limiter
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Ceiling level in dB (maximum output level)
+    #[serde(default = "default_limiter_ceiling")]
+    pub ceiling_db: f32,
+
+    /// Release time in milliseconds
+    #[serde(default = "default_limiter_release")]
+    pub release_ms: f32,
+}
+
 // Default value functions
 fn default_hotkey() -> String {
     "ControlRight".to_string()
@@ -168,6 +243,39 @@ fn default_separator() -> String {
 
 fn default_true() -> bool {
     true
+}
+
+// Audio preprocessing defaults
+fn default_normalization_target() -> f32 {
+    -18.0 // dB - good level for speech
+}
+
+fn default_compression_threshold() -> f32 {
+    -24.0 // dB - where compression starts
+}
+
+fn default_compression_ratio() -> f32 {
+    4.0 // 4:1 compression ratio
+}
+
+fn default_compression_attack() -> f32 {
+    5.0 // ms - fast attack for speech
+}
+
+fn default_compression_release() -> f32 {
+    50.0 // ms - moderate release
+}
+
+fn default_compression_makeup_gain() -> f32 {
+    6.0 // dB - boost after compression
+}
+
+fn default_limiter_ceiling() -> f32 {
+    -1.0 // dB - leave headroom to prevent clipping
+}
+
+fn default_limiter_release() -> f32 {
+    50.0 // ms
 }
 
 impl Default for HotkeyConfig {
@@ -232,6 +340,49 @@ impl Default for GpuConfig {
         Self {
             auto_detect: true,
             devices: vec![],
+        }
+    }
+}
+
+impl Default for AudioConfig {
+    fn default() -> Self {
+        Self {
+            preprocessing: false, // Disabled by default (opt-in)
+            normalization: NormalizationConfig::default(),
+            compression: CompressionConfig::default(),
+            limiter: LimiterConfig::default(),
+        }
+    }
+}
+
+impl Default for NormalizationConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true, // Enabled when preprocessing is on
+            target_db: default_normalization_target(),
+        }
+    }
+}
+
+impl Default for CompressionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true, // Enabled when preprocessing is on
+            threshold_db: default_compression_threshold(),
+            ratio: default_compression_ratio(),
+            attack_ms: default_compression_attack(),
+            release_ms: default_compression_release(),
+            makeup_gain_db: default_compression_makeup_gain(),
+        }
+    }
+}
+
+impl Default for LimiterConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true, // Enabled when preprocessing is on
+            ceiling_db: default_limiter_ceiling(),
+            release_ms: default_limiter_release(),
         }
     }
 }

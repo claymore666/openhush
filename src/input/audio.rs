@@ -71,6 +71,158 @@ impl AudioBuffer {
             .map(|&s| (s * i16::MAX as f32) as i16)
             .collect()
     }
+
+    /// Calculate RMS (Root Mean Square) level in dB
+    pub fn rms_db(&self) -> f32 {
+        if self.samples.is_empty() {
+            return f32::NEG_INFINITY;
+        }
+
+        let sum_squares: f32 = self.samples.iter().map(|&s| s * s).sum();
+        let rms = (sum_squares / self.samples.len() as f32).sqrt();
+
+        if rms > 0.0 {
+            20.0 * rms.log10()
+        } else {
+            f32::NEG_INFINITY
+        }
+    }
+
+    /// Normalize audio to target RMS level in dB
+    ///
+    /// RMS normalization is better suited for speech than peak normalization
+    /// as it considers the average loudness rather than just the peaks.
+    pub fn normalize_rms(&mut self, target_db: f32) {
+        let current_rms_db = self.rms_db();
+
+        if current_rms_db.is_finite() {
+            let gain_db = target_db - current_rms_db;
+            self.apply_gain(gain_db);
+            debug!(
+                "RMS normalized: {:.1} dB -> {:.1} dB (gain: {:.1} dB)",
+                current_rms_db, target_db, gain_db
+            );
+        } else {
+            debug!("Skipping normalization: audio is silent");
+        }
+    }
+
+    /// Apply gain in dB to all samples
+    pub fn apply_gain(&mut self, gain_db: f32) {
+        let gain_linear = 10.0_f32.powf(gain_db / 20.0);
+
+        for sample in &mut self.samples {
+            *sample *= gain_linear;
+        }
+    }
+
+    /// Apply dynamic compression with attack/release envelope
+    ///
+    /// - `threshold_db`: Level where compression kicks in
+    /// - `ratio`: Compression ratio (e.g., 4.0 for 4:1)
+    /// - `attack_ms`: Time to reach full compression
+    /// - `release_ms`: Time to release compression
+    /// - `makeup_gain_db`: Gain applied after compression
+    pub fn compress(
+        &mut self,
+        threshold_db: f32,
+        ratio: f32,
+        attack_ms: f32,
+        release_ms: f32,
+        makeup_gain_db: f32,
+    ) {
+        if self.samples.is_empty() || ratio <= 1.0 {
+            return;
+        }
+
+        let threshold_linear = 10.0_f32.powf(threshold_db / 20.0);
+
+        // Calculate time constants (samples)
+        let attack_coeff = (-1.0 / (attack_ms * self.sample_rate as f32 / 1000.0)).exp();
+        let release_coeff = (-1.0 / (release_ms * self.sample_rate as f32 / 1000.0)).exp();
+
+        let mut envelope = 0.0_f32;
+
+        let rms_before = self.rms_db();
+
+        for sample in &mut self.samples {
+            let input_abs = sample.abs();
+
+            // Smooth envelope follower with attack/release
+            if input_abs > envelope {
+                envelope = attack_coeff * envelope + (1.0 - attack_coeff) * input_abs;
+            } else {
+                envelope = release_coeff * envelope + (1.0 - release_coeff) * input_abs;
+            }
+
+            // Calculate gain reduction
+            let gain = if envelope > threshold_linear {
+                let over_db = 20.0 * (envelope / threshold_linear).log10();
+                let compressed_db = over_db / ratio;
+                let reduction_db = over_db - compressed_db;
+                10.0_f32.powf(-reduction_db / 20.0)
+            } else {
+                1.0
+            };
+
+            *sample *= gain;
+        }
+
+        // Apply makeup gain
+        if makeup_gain_db != 0.0 {
+            self.apply_gain(makeup_gain_db);
+        }
+
+        let rms_after = self.rms_db();
+        debug!(
+            "Compressed: {:.1} dB -> {:.1} dB (ratio: {}:1, makeup: {:.1} dB)",
+            rms_before, rms_after, ratio, makeup_gain_db
+        );
+    }
+
+    /// Apply limiter to prevent clipping
+    ///
+    /// - `ceiling_db`: Maximum output level (e.g., -1.0 dB)
+    /// - `release_ms`: Release time for the limiter
+    pub fn limit(&mut self, ceiling_db: f32, release_ms: f32) {
+        if self.samples.is_empty() {
+            return;
+        }
+
+        let ceiling_linear = 10.0_f32.powf(ceiling_db / 20.0);
+        let release_coeff = (-1.0 / (release_ms * self.sample_rate as f32 / 1000.0)).exp();
+
+        let mut gain_reduction = 1.0_f32;
+        let mut peaks_limited = 0_usize;
+
+        for sample in &mut self.samples {
+            let input_abs = sample.abs();
+
+            // Calculate required gain reduction for this sample
+            let target_gain = if input_abs > ceiling_linear {
+                peaks_limited += 1;
+                ceiling_linear / input_abs
+            } else {
+                1.0
+            };
+
+            // Instant attack (brick wall), smooth release
+            if target_gain < gain_reduction {
+                gain_reduction = target_gain; // Instant attack
+            } else {
+                gain_reduction = release_coeff * gain_reduction + (1.0 - release_coeff) * target_gain;
+            }
+
+            *sample *= gain_reduction;
+        }
+
+        if peaks_limited > 0 {
+            debug!(
+                "Limited {} samples to {:.1} dB ceiling",
+                peaks_limited, ceiling_db
+            );
+        }
+    }
 }
 
 /// Audio recorder for capturing microphone input
