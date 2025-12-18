@@ -15,7 +15,7 @@ cuda = ["whisper-rs/cuda"]
 
 [dependencies]
 # Transcription
-whisper-rs = "0.13"
+whisper-rs = "0.15"
 
 # Audio capture
 cpal = "0.15"
