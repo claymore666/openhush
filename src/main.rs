@@ -4,6 +4,9 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilte
 
 mod config;
 mod daemon;
+mod engine;
+mod input;
+mod output;
 mod platform;
 
 #[derive(Parser)]

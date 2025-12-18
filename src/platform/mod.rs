@@ -6,6 +6,8 @@
 //! - Notifications
 //! - Audio feedback
 
+#![allow(dead_code)]
+
 use thiserror::Error;
 
 #[cfg(target_os = "linux")]

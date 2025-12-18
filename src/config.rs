@@ -20,7 +20,7 @@ pub enum ConfigError {
     SerializeError(#[from] toml::ser::Error),
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct Config {
     #[serde(default)]
     pub hotkey: HotkeyConfig,
@@ -166,19 +166,6 @@ fn default_true() -> bool {
     true
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            hotkey: HotkeyConfig::default(),
-            transcription: TranscriptionConfig::default(),
-            output: OutputConfig::default(),
-            correction: CorrectionConfig::default(),
-            feedback: FeedbackConfig::default(),
-            queue: QueueConfig::default(),
-            gpu: GpuConfig::default(),
-        }
-    }
-}
 
 impl Default for HotkeyConfig {
     fn default() -> Self {

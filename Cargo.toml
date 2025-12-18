@@ -12,6 +12,7 @@ categories = ["command-line-utilities", "accessibility"]
 [features]
 default = []
 cuda = ["whisper-rs/cuda"]
+debug-audio = []
 
 [dependencies]
 # Transcription

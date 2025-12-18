@@ -8,11 +8,13 @@
 //! 5. Outputs text to clipboard and/or pastes at cursor
 
 use crate::config::Config;
+use crate::engine::{WhisperEngine, WhisperError};
+use crate::input::{AudioRecorder, AudioRecorderError, HotkeyEvent, HotkeyListener};
+use crate::output::{OutputError, OutputHandler};
 use crate::platform::{CurrentPlatform, Platform};
 use std::path::PathBuf;
 use thiserror::Error;
-use tokio::sync::mpsc;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 #[derive(Error, Debug)]
 pub enum DaemonError {
@@ -22,47 +24,44 @@ pub enum DaemonError {
     #[error("Platform error: {0}")]
     Platform(#[from] crate::platform::PlatformError),
 
+    #[error("Hotkey error: {0}")]
+    Hotkey(#[from] crate::input::HotkeyListenerError),
+
+    #[error("Audio error: {0}")]
+    Audio(#[from] AudioRecorderError),
+
+    #[error("Whisper error: {0}")]
+    Whisper(#[from] WhisperError),
+
+    #[error("Output error: {0}")]
+    Output(#[from] OutputError),
+
     #[error("Daemon already running")]
     AlreadyRunning,
 
     #[error("Daemon not running")]
     NotRunning,
 
-    #[error("Model not found: {0}")]
-    ModelNotFound(String),
-
-    #[error("Transcription error: {0}")]
-    Transcription(String),
-
-    #[error("Audio error: {0}")]
-    Audio(String),
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
 }
 
-/// Recording with sequence ID for ordered output
-#[derive(Debug)]
-struct Recording {
-    sequence_id: u64,
-    audio_data: Vec<f32>,
+/// Daemon state machine
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DaemonState {
+    /// Waiting for hotkey press
+    Idle,
+    /// Recording audio (hotkey held)
+    Recording,
+    /// Transcribing audio
+    Transcribing,
 }
 
-/// Transcription result with sequence ID
-#[derive(Debug)]
-struct TranscriptionResult {
-    sequence_id: u64,
-    text: String,
-}
-
-/// Daemon state
+/// Main daemon struct
 pub struct Daemon {
     config: Config,
     platform: CurrentPlatform,
-    recording_tx: mpsc::Sender<Recording>,
-    recording_rx: mpsc::Receiver<Recording>,
-    result_tx: mpsc::Sender<TranscriptionResult>,
-    result_rx: mpsc::Receiver<TranscriptionResult>,
-    sequence_counter: u64,
-    next_output_sequence: u64,
-    pending_results: Vec<TranscriptionResult>,
+    state: DaemonState,
 }
 
 impl Daemon {
@@ -70,20 +69,10 @@ impl Daemon {
     pub fn new(config: Config) -> Result<Self, DaemonError> {
         let platform = CurrentPlatform::new()?;
 
-        // Channels for recording queue and results
-        let (recording_tx, recording_rx) = mpsc::channel(100);
-        let (result_tx, result_rx) = mpsc::channel(100);
-
         Ok(Self {
             config,
             platform,
-            recording_tx,
-            recording_rx,
-            result_tx,
-            result_rx,
-            sequence_counter: 0,
-            next_output_sequence: 0,
-            pending_results: Vec::new(),
+            state: DaemonState::Idle,
         })
     }
 
@@ -92,69 +81,7 @@ impl Daemon {
         let data_dir = Config::data_dir()?;
         let model_file = format!("ggml-{}.bin", self.config.transcription.model);
         let path = data_dir.join("models").join(&model_file);
-
-        if !path.exists() {
-            return Err(DaemonError::ModelNotFound(format!(
-                "Model '{}' not found at {}. Run 'openhush model download {}'",
-                self.config.transcription.model,
-                path.display(),
-                self.config.transcription.model
-            )));
-        }
-
         Ok(path)
-    }
-
-    /// Queue a recording for transcription
-    fn queue_recording(&mut self, audio_data: Vec<f32>) -> Result<(), DaemonError> {
-        let recording = Recording {
-            sequence_id: self.sequence_counter,
-            audio_data,
-        };
-        self.sequence_counter += 1;
-
-        // Check queue limit
-        if self.config.queue.max_pending > 0 {
-            // TODO: Check current queue size
-        }
-
-        self.recording_tx
-            .try_send(recording)
-            .map_err(|_| DaemonError::Audio("Recording queue full".into()))?;
-
-        Ok(())
-    }
-
-    /// Process transcription results in order
-    fn process_results(&mut self) -> Option<String> {
-        // Collect any new results
-        while let Ok(result) = self.result_rx.try_recv() {
-            self.pending_results.push(result);
-        }
-
-        // Sort by sequence ID
-        self.pending_results.sort_by_key(|r| r.sequence_id);
-
-        // Output results in order
-        let mut output = String::new();
-        while let Some(pos) = self
-            .pending_results
-            .iter()
-            .position(|r| r.sequence_id == self.next_output_sequence)
-        {
-            let result = self.pending_results.remove(pos);
-            if !output.is_empty() {
-                output.push_str(&self.config.queue.separator);
-            }
-            output.push_str(&result.text);
-            self.next_output_sequence += 1;
-        }
-
-        if output.is_empty() {
-            None
-        } else {
-            Some(output)
-        }
     }
 
     /// Main daemon loop
@@ -166,24 +93,103 @@ impl Daemon {
         info!("Hotkey: {}", self.config.hotkey.key);
         info!("Model: {}", self.config.transcription.model);
 
-        // Verify model exists
+        // Check if model exists
         let model_path = self.model_path()?;
-        info!("Model path: {}", model_path.display());
+        if !model_path.exists() {
+            error!(
+                "Model not found at: {}. Run 'openhush model download {}'",
+                model_path.display(),
+                self.config.transcription.model
+            );
+            return Err(DaemonError::Whisper(WhisperError::ModelNotFound(
+                model_path,
+                self.config.transcription.model.clone(),
+            )));
+        }
 
-        // TODO: Load Whisper model
-        // TODO: Start hotkey listener
-        // TODO: Start audio capture
-        // TODO: Start transcription workers
+        info!("Loading Whisper model...");
+        let engine = WhisperEngine::new(&model_path, &self.config.transcription.language)?;
+        info!("Model loaded successfully");
 
-        // For now, just wait
-        info!("Daemon running. Press Ctrl+C to stop.");
+        // Initialize output handler
+        let output_handler = OutputHandler::new(&self.config.output);
 
-        // Placeholder: wait for shutdown signal
-        tokio::signal::ctrl_c()
-            .await
-            .map_err(|e| DaemonError::Audio(e.to_string()))?;
+        // Initialize audio recorder
+        let mut audio_recorder = AudioRecorder::new()?;
 
-        info!("Shutdown signal received");
+        // Initialize hotkey listener
+        let (hotkey_listener, mut hotkey_rx) =
+            HotkeyListener::new(&self.config.hotkey.key)?;
+        hotkey_listener.start()?;
+
+        info!("Daemon running. Hold {} to record, release to transcribe.",
+              self.config.hotkey.key);
+
+        // Main event loop
+        loop {
+            tokio::select! {
+                // Handle hotkey events
+                Some(event) = hotkey_rx.recv() => {
+                    match event {
+                        HotkeyEvent::Pressed => {
+                            if self.state == DaemonState::Idle {
+                                debug!("Hotkey pressed, starting recording");
+                                self.state = DaemonState::Recording;
+
+                                if let Err(e) = audio_recorder.start() {
+                                    error!("Failed to start recording: {}", e);
+                                    self.state = DaemonState::Idle;
+                                }
+                            }
+                        }
+                        HotkeyEvent::Released => {
+                            if self.state == DaemonState::Recording {
+                                debug!("Hotkey released, stopping recording");
+                                self.state = DaemonState::Transcribing;
+
+                                match audio_recorder.stop() {
+                                    Ok(buffer) => {
+                                        info!("Recorded {:.2}s of audio", buffer.duration_secs());
+
+                                        // Transcribe
+                                        match engine.transcribe(&buffer) {
+                                            Ok(result) => {
+                                                info!("Transcribed {} characters", result.text.len());
+
+                                                // Output
+                                                if let Err(e) = output_handler.output(&result.text) {
+                                                    error!("Output failed: {}", e);
+                                                }
+                                            }
+                                            Err(e) => {
+                                                error!("Transcription failed: {}", e);
+                                            }
+                                        }
+                                    }
+                                    Err(AudioRecorderError::TooShort) => {
+                                        warn!("Recording too short, ignoring");
+                                    }
+                                    Err(e) => {
+                                        error!("Failed to stop recording: {}", e);
+                                    }
+                                }
+
+                                self.state = DaemonState::Idle;
+                            }
+                        }
+                    }
+                }
+
+                // Handle shutdown signal
+                _ = tokio::signal::ctrl_c() => {
+                    info!("Shutdown signal received");
+                    break;
+                }
+            }
+        }
+
+        hotkey_listener.stop();
+        info!("Daemon stopped");
         Ok(())
     }
 }
@@ -191,8 +197,8 @@ impl Daemon {
 /// Get the PID file path
 fn pid_file() -> Result<PathBuf, DaemonError> {
     let runtime_dir = dirs::runtime_dir()
-        .or_else(|| dirs::cache_dir())
-        .ok_or_else(|| DaemonError::Config(crate::config::ConfigError::NoConfigDir))?;
+        .or_else(dirs::cache_dir)
+        .ok_or(DaemonError::Config(crate::config::ConfigError::NoConfigDir))?;
 
     Ok(runtime_dir.join("openhush.pid"))
 }
@@ -203,16 +209,13 @@ fn is_running() -> bool {
         if path.exists() {
             if let Ok(pid_str) = std::fs::read_to_string(&path) {
                 if let Ok(pid) = pid_str.trim().parse::<i32>() {
-                    // Check if process exists
                     #[cfg(unix)]
                     {
-                        use std::os::unix::process::CommandExt;
                         let result = unsafe { libc::kill(pid, 0) };
                         return result == 0;
                     }
                     #[cfg(not(unix))]
                     {
-                        // On Windows, just check if PID file exists
                         return true;
                     }
                 }
@@ -226,11 +229,9 @@ fn is_running() -> bool {
 fn write_pid() -> Result<(), DaemonError> {
     let path = pid_file()?;
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| DaemonError::Audio(e.to_string()))?;
+        std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(&path, std::process::id().to_string())
-        .map_err(|e| DaemonError::Audio(e.to_string()))?;
+    std::fs::write(&path, std::process::id().to_string())?;
     Ok(())
 }
 
@@ -238,8 +239,7 @@ fn write_pid() -> Result<(), DaemonError> {
 fn remove_pid() -> Result<(), DaemonError> {
     let path = pid_file()?;
     if path.exists() {
-        std::fs::remove_file(&path)
-            .map_err(|e| DaemonError::Audio(e.to_string()))?;
+        std::fs::remove_file(&path)?;
     }
     Ok(())
 }
@@ -253,7 +253,6 @@ pub async fn run(foreground: bool) -> Result<(), DaemonError> {
     let config = Config::load()?;
 
     if !foreground {
-        // TODO: Daemonize (fork to background)
         warn!("Background mode not yet implemented, running in foreground");
     }
 
