@@ -52,7 +52,7 @@ anyhow = "1"
 
 # Platform paths (XDG on Linux, native elsewhere)
 directories = "5"
-dirs = "5"
+dirs = "6"
 
 # Unix process management
 [target.'cfg(unix)'.dependencies]
