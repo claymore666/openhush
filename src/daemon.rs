@@ -3,23 +3,29 @@
 //! The daemon:
 //! 1. Loads and keeps the Whisper model in memory
 //! 2. Listens for hotkey events
-//! 3. Captures audio while hotkey is held
-//! 4. Queues recordings for transcription
-//! 5. Outputs text to clipboard and/or pastes at cursor
+//! 3. Captures audio while hotkey is held (via always-on ring buffer)
+//! 4. Queues recordings for async transcription
+//! 5. Outputs text to clipboard and/or pastes at cursor (in order)
 
-use crate::config::{AudioConfig, Config};
+use crate::config::Config;
 use crate::engine::{WhisperEngine, WhisperError};
 use crate::gui;
-use crate::input::{AudioBuffer, AudioRecorder, AudioRecorderError, HotkeyEvent, HotkeyListener};
+use crate::input::{AudioMark, AudioRecorder, AudioRecorderError, HotkeyEvent, HotkeyListener};
 use crate::output::{OutputError, OutputHandler};
 use crate::platform::{CurrentPlatform, Platform};
+use crate::queue::{worker::spawn_worker, TranscriptionJob, TranscriptionTracker};
 use crate::tray::{TrayEvent, TrayManager};
 use std::path::PathBuf;
 use thiserror::Error;
+use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
 #[cfg(target_os = "linux")]
+#[allow(clippy::single_component_path_imports)]
 use gtk;
+
+/// Channel buffer size for job and result queues
+const CHANNEL_BUFFER_SIZE: usize = 32;
 
 #[derive(Error, Debug)]
 pub enum DaemonError {
@@ -52,14 +58,22 @@ pub enum DaemonError {
 }
 
 /// Daemon state machine
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// Note: There is no "Transcribing" state anymore - transcription happens
+/// asynchronously in a background worker thread.
+#[derive(Debug, Clone)]
 enum DaemonState {
     /// Waiting for hotkey press
     Idle,
-    /// Recording audio (hotkey held)
-    Recording,
-    /// Transcribing audio
-    Transcribing,
+    /// Recording audio (hotkey held) with streaming chunk support
+    Recording {
+        /// Original mark for sequence_id
+        mark: AudioMark,
+        /// Position of last emitted chunk (or mark.position initially)
+        last_chunk_pos: usize,
+        /// Next chunk ID (0, 1, 2, ...)
+        next_chunk_id: u32,
+    },
 }
 
 /// Main daemon struct
@@ -79,46 +93,6 @@ impl Daemon {
             platform,
             state: DaemonState::Idle,
         })
-    }
-
-    /// Apply audio preprocessing (normalization, compression, limiter)
-    fn preprocess_audio(buffer: &mut AudioBuffer, audio_config: &AudioConfig) {
-        if !audio_config.preprocessing {
-            return;
-        }
-
-        let rms_before = buffer.rms_db();
-        debug!("Preprocessing audio (input RMS: {:.1} dB)", rms_before);
-
-        // 1. RMS Normalization
-        if audio_config.normalization.enabled {
-            buffer.normalize_rms(audio_config.normalization.target_db);
-        }
-
-        // 2. Dynamic Compression
-        if audio_config.compression.enabled {
-            buffer.compress(
-                audio_config.compression.threshold_db,
-                audio_config.compression.ratio,
-                audio_config.compression.attack_ms,
-                audio_config.compression.release_ms,
-                audio_config.compression.makeup_gain_db,
-            );
-        }
-
-        // 3. Limiter (safety net)
-        if audio_config.limiter.enabled {
-            buffer.limit(
-                audio_config.limiter.ceiling_db,
-                audio_config.limiter.release_ms,
-            );
-        }
-
-        let rms_after = buffer.rms_db();
-        info!(
-            "Audio preprocessed: {:.1} dB -> {:.1} dB",
-            rms_before, rms_after
-        );
     }
 
     /// Get the path to the Whisper model file
@@ -169,15 +143,17 @@ impl Daemon {
             )));
         }
 
-        info!("Loading Whisper model...");
+        let use_gpu = self.config.transcription.device.to_lowercase() != "cpu";
+        info!("Loading Whisper model (GPU: {})...", use_gpu);
         let engine = WhisperEngine::new(
             &model_path,
             &self.config.transcription.language,
             self.config.transcription.translate,
+            use_gpu,
         )?;
         info!(
-            "Model loaded successfully (translate={})",
-            self.config.transcription.translate
+            "Model loaded successfully (translate={}, device={})",
+            self.config.transcription.translate, self.config.transcription.device
         );
 
         if self.config.audio.preprocessing {
@@ -192,12 +168,51 @@ impl Daemon {
         // Initialize output handler
         let output_handler = OutputHandler::new(&self.config.output);
 
-        // Initialize audio recorder
-        let mut audio_recorder = AudioRecorder::new()?;
+        // Initialize always-on audio recorder with ring buffer
+        let prebuffer_secs = self.config.audio.prebuffer_duration_secs;
+        let audio_recorder = AudioRecorder::new_always_on(prebuffer_secs)?;
+        info!(
+            "Always-on audio capture initialized ({:.0}s ring buffer)",
+            prebuffer_secs
+        );
+
+        // Create transcription job and result channels
+        let (job_tx, job_rx) = mpsc::channel(CHANNEL_BUFFER_SIZE);
+        let (result_tx, mut result_rx) = mpsc::channel(CHANNEL_BUFFER_SIZE);
+
+        // Spawn transcription worker in dedicated thread
+        let audio_config = self.config.audio.clone();
+        let _worker_handle = spawn_worker(engine, job_rx, result_tx, audio_config);
+        info!("Transcription worker started");
+
+        // Result tracker for ordered output
+        let mut tracker = TranscriptionTracker::new();
 
         // Initialize hotkey listener
         let (hotkey_listener, mut hotkey_rx) = HotkeyListener::new(&self.config.hotkey.key)?;
         hotkey_listener.start()?;
+
+        // Chunk separator (space by default)
+        let chunk_separator = &self.config.queue.separator;
+
+        // Streaming chunk interval (convert to Duration)
+        let chunk_interval_secs = self.config.queue.chunk_interval_secs;
+        let chunk_interval = if chunk_interval_secs > 0.0 {
+            Some(tokio::time::Duration::from_secs_f32(chunk_interval_secs))
+        } else {
+            None
+        };
+        info!(
+            "Streaming mode: {}",
+            if chunk_interval.is_some() {
+                format!("chunks every {:.1}s", chunk_interval_secs)
+            } else {
+                "disabled".to_string()
+            }
+        );
+
+        // Chunk timer (resets on each recording start)
+        let mut chunk_timer: Option<tokio::time::Interval> = None;
 
         info!(
             "Daemon running. Hold {} to record, release to transcribe.",
@@ -238,53 +253,189 @@ impl Daemon {
                 Some(event) = hotkey_rx.recv() => {
                     match event {
                         HotkeyEvent::Pressed => {
-                            if self.state == DaemonState::Idle {
-                                debug!("Hotkey pressed, starting recording");
-                                self.state = DaemonState::Recording;
+                            if matches!(self.state, DaemonState::Idle) {
+                                // Mark the current position in the ring buffer (instant!)
+                                let mark = audio_recorder.mark();
+                                let start_pos = audio_recorder.current_position();
+                                debug!(
+                                    "Hotkey pressed, marked position (sequence_id: {}, pos: {})",
+                                    mark.sequence_id, start_pos
+                                );
 
-                                if let Err(e) = audio_recorder.start() {
-                                    error!("Failed to start recording: {}", e);
-                                    self.state = DaemonState::Idle;
+                                // Start chunk timer if streaming is enabled
+                                if let Some(interval) = chunk_interval {
+                                    let mut timer = tokio::time::interval(interval);
+                                    timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                                    // Skip the first tick (fires immediately)
+                                    chunk_timer = Some(timer);
                                 }
+
+                                // Reset deduplication state for new recording
+                                tracker.reset_dedup();
+
+                                self.state = DaemonState::Recording {
+                                    mark,
+                                    last_chunk_pos: start_pos,
+                                    next_chunk_id: 0,
+                                };
                             }
                         }
                         HotkeyEvent::Released => {
-                            if self.state == DaemonState::Recording {
-                                debug!("Hotkey released, stopping recording");
-                                self.state = DaemonState::Transcribing;
+                            if let DaemonState::Recording { mark, last_chunk_pos, next_chunk_id } = std::mem::replace(
+                                &mut self.state,
+                                DaemonState::Idle,
+                            ) {
+                                // Stop chunk timer
+                                chunk_timer = None;
 
-                                match audio_recorder.stop() {
-                                    Ok(mut buffer) => {
-                                        info!("Recorded {:.2}s of audio", buffer.duration_secs());
+                                let current_pos = audio_recorder.current_position();
+                                debug!(
+                                    "Hotkey released, extracting final chunk (sequence_id: {}, chunk: {}, pos: {} -> {})",
+                                    mark.sequence_id, next_chunk_id, last_chunk_pos, current_pos
+                                );
 
-                                        // Apply preprocessing if enabled
-                                        Self::preprocess_audio(&mut buffer, &self.config.audio);
+                                // Extract final chunk from last position to current
+                                if let Some(buffer) = audio_recorder.extract_chunk(last_chunk_pos, current_pos) {
+                                    info!(
+                                        "Final chunk {:.2}s (seq {}.{} FINAL)",
+                                        buffer.duration_secs(),
+                                        mark.sequence_id,
+                                        next_chunk_id
+                                    );
 
-                                        // Transcribe
-                                        match engine.transcribe(&buffer) {
-                                            Ok(result) => {
-                                                info!("Transcribed {} characters", result.text.len());
+                                    // Track pending transcription
+                                    tracker.add_pending(mark.sequence_id, next_chunk_id);
 
-                                                // Output
-                                                if let Err(e) = output_handler.output(&result.text) {
-                                                    error!("Output failed: {}", e);
-                                                }
-                                            }
-                                            Err(e) => {
-                                                error!("Transcription failed: {}", e);
-                                            }
-                                        }
+                                    // Submit final job
+                                    let job = TranscriptionJob {
+                                        buffer,
+                                        sequence_id: mark.sequence_id,
+                                        chunk_id: next_chunk_id,
+                                        is_final: true,
+                                    };
+                                    if job_tx.send(job).await.is_err() {
+                                        error!("Failed to submit final transcription job");
                                     }
-                                    Err(AudioRecorderError::TooShort) => {
-                                        warn!("Recording too short, ignoring");
-                                    }
-                                    Err(e) => {
-                                        error!("Failed to stop recording: {}", e);
-                                    }
+                                } else if next_chunk_id == 0 {
+                                    // No chunks emitted and final chunk too short
+                                    warn!("Recording too short, ignoring");
+                                } else {
+                                    debug!("Final chunk too short, but {} chunks already emitted", next_chunk_id);
                                 }
 
-                                self.state = DaemonState::Idle;
+                                // Flush any buffered results now that hotkey is released
+                                for ready in tracker.take_ready() {
+                                    if !ready.text.is_empty() {
+                                        // Add separator before chunks after the first
+                                        let text = if ready.chunk_id > 0 {
+                                            format!("{}{}", chunk_separator, ready.text)
+                                        } else {
+                                            ready.text
+                                        };
+                                        info!(
+                                            "📝 Output (seq {}.{}, {} chars)",
+                                            ready.sequence_id,
+                                            ready.chunk_id,
+                                            text.len()
+                                        );
+                                        if let Err(e) = output_handler.output(&text) {
+                                            error!("Output failed: {}", e);
+                                        }
+                                    }
+                                }
                             }
+                        }
+                    }
+                }
+
+                // Handle transcription results from worker
+                Some(result) = result_rx.recv() => {
+                    debug!(
+                        "Received transcription result (seq {}.{}, {} chars)",
+                        result.sequence_id,
+                        result.chunk_id,
+                        result.text.len()
+                    );
+
+                    // Add to tracker
+                    tracker.add_result(result);
+
+                    // Only output when NOT recording (hotkey released)
+                    // This prevents AltGr/modifier key from affecting typed output
+                    if matches!(self.state, DaemonState::Idle) {
+                        for ready in tracker.take_ready() {
+                            if !ready.text.is_empty() {
+                                // Add separator before chunks after the first
+                                let text = if ready.chunk_id > 0 {
+                                    format!("{}{}", chunk_separator, ready.text)
+                                } else {
+                                    ready.text
+                                };
+                                info!(
+                                    "📝 Output (seq {}.{}, {} chars)",
+                                    ready.sequence_id,
+                                    ready.chunk_id,
+                                    text.len()
+                                );
+                                if let Err(e) = output_handler.output(&text) {
+                                    error!("Output failed: {}", e);
+                                }
+                            } else {
+                                debug!(
+                                    "Empty transcription result (seq {}.{})",
+                                    ready.sequence_id,
+                                    ready.chunk_id
+                                );
+                            }
+                        }
+                    } else {
+                        debug!("Buffering result while recording (will output on release)");
+                    }
+                }
+
+                // Handle chunk timer tick (streaming transcription)
+                _ = async {
+                    if let Some(timer) = &mut chunk_timer {
+                        timer.tick().await;
+                    } else {
+                        std::future::pending::<()>().await;
+                    }
+                } => {
+                    if let DaemonState::Recording { ref mark, ref mut last_chunk_pos, ref mut next_chunk_id } = self.state {
+                        let current_pos = audio_recorder.current_position();
+                        debug!(
+                            "Chunk timer tick (seq {}.{}, pos: {} -> {})",
+                            mark.sequence_id, *next_chunk_id, *last_chunk_pos, current_pos
+                        );
+
+                        // Extract chunk from last position to current
+                        if let Some(buffer) = audio_recorder.extract_chunk(*last_chunk_pos, current_pos) {
+                            info!(
+                                "📤 Streaming chunk {:.2}s (seq {}.{})",
+                                buffer.duration_secs(),
+                                mark.sequence_id,
+                                *next_chunk_id
+                            );
+
+                            // Track pending transcription
+                            tracker.add_pending(mark.sequence_id, *next_chunk_id);
+
+                            // Submit chunk job
+                            let job = TranscriptionJob {
+                                buffer,
+                                sequence_id: mark.sequence_id,
+                                chunk_id: *next_chunk_id,
+                                is_final: false,
+                            };
+                            if job_tx.send(job).await.is_err() {
+                                error!("Failed to submit chunk transcription job");
+                            }
+
+                            // Update state for next chunk
+                            *last_chunk_pos = current_pos;
+                            *next_chunk_id += 1;
+                        } else {
+                            debug!("Chunk too short, skipping");
                         }
                     }
                 }
@@ -300,7 +451,9 @@ impl Daemon {
             }
         }
 
+        // Cleanup
         hotkey_listener.stop();
+        drop(job_tx); // Signal worker to stop
         info!("Daemon stopped");
         Ok(())
     }

@@ -6,7 +6,9 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 use tracing::{debug, info};
-use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperState};
+use whisper_rs::{
+    FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperState,
+};
 
 #[derive(Error, Debug)]
 pub enum WhisperError {
@@ -109,8 +111,17 @@ impl WhisperEngine {
     /// If false, audio will be transcribed in its original language.
     ///
     /// The engine pre-allocates GPU buffers for fast transcription.
-    pub fn new(model_path: &Path, language: &str, translate: bool) -> Result<Self, WhisperError> {
-        info!("Loading Whisper model from: {}", model_path.display());
+    pub fn new(
+        model_path: &Path,
+        language: &str,
+        translate: bool,
+        use_gpu: bool,
+    ) -> Result<Self, WhisperError> {
+        info!(
+            "Loading Whisper model from: {} (GPU: {})",
+            model_path.display(),
+            use_gpu
+        );
 
         if !model_path.exists() {
             // Extract model name from path for error message
@@ -127,7 +138,8 @@ impl WhisperEngine {
             ));
         }
 
-        let params = WhisperContextParameters::default();
+        let mut params = WhisperContextParameters::default();
+        params.use_gpu(use_gpu);
 
         let ctx = WhisperContext::new_with_params(model_path.to_str().unwrap_or_default(), params)
             .map_err(|e| WhisperError::LoadFailed(format!("{:?}", e)))?;
@@ -159,11 +171,13 @@ impl WhisperEngine {
             WhisperModel::from_str(&config.transcription.model).unwrap_or(WhisperModel::Base);
 
         let model_path = data_dir.join("models").join(model.filename());
+        let use_gpu = config.transcription.device.to_lowercase() != "cpu";
 
         Self::new(
             &model_path,
             &config.transcription.language,
             config.transcription.translate,
+            use_gpu,
         )
     }
 

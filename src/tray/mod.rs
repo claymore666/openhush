@@ -10,6 +10,7 @@ use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{TrayIcon, TrayIconBuilder};
 
 #[cfg(target_os = "linux")]
+#[allow(clippy::single_component_path_imports)]
 use gtk;
 
 mod icon;

@@ -123,6 +123,12 @@ pub struct QueueConfig {
     /// Separator between transcriptions
     #[serde(default = "default_separator")]
     pub separator: String,
+
+    /// Chunk interval for streaming transcription in seconds.
+    /// During long recordings, audio is split into chunks and transcribed
+    /// in parallel for lower latency. Set to 0 to disable streaming.
+    #[serde(default = "default_chunk_interval")]
+    pub chunk_interval_secs: f32,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -136,8 +142,14 @@ pub struct GpuConfig {
     pub devices: Vec<u32>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AudioConfig {
+    /// Duration of the always-on audio ring buffer in seconds.
+    /// This enables instant recording with no startup delay.
+    /// Higher values use more memory (~2MB per 30 seconds at 16kHz).
+    #[serde(default = "default_prebuffer_duration")]
+    pub prebuffer_duration_secs: f32,
+
     /// Enable/disable all preprocessing
     #[serde(default)]
     pub preprocessing: bool,
@@ -153,6 +165,18 @@ pub struct AudioConfig {
     /// Limiter settings
     #[serde(default)]
     pub limiter: LimiterConfig,
+}
+
+impl Default for AudioConfig {
+    fn default() -> Self {
+        Self {
+            prebuffer_duration_secs: default_prebuffer_duration(),
+            preprocessing: false,
+            normalization: NormalizationConfig::default(),
+            compression: CompressionConfig::default(),
+            limiter: LimiterConfig::default(),
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -218,7 +242,7 @@ fn default_mode() -> String {
 }
 
 fn default_model() -> String {
-    "small".to_string() // "small" recommended for reliable multilingual support
+    "large-v3".to_string() // Best accuracy for multilingual transcription
 }
 
 fn default_language() -> String {
@@ -241,11 +265,19 @@ fn default_separator() -> String {
     " ".to_string()
 }
 
+fn default_chunk_interval() -> f32 {
+    5.0 // seconds - emit chunks every 5 seconds for streaming transcription
+}
+
 fn default_true() -> bool {
     true
 }
 
 // Audio preprocessing defaults
+fn default_prebuffer_duration() -> f32 {
+    30.0 // seconds - ring buffer duration for instant capture
+}
+
 fn default_normalization_target() -> f32 {
     -18.0 // dB - good level for speech
 }
@@ -331,6 +363,7 @@ impl Default for QueueConfig {
         Self {
             max_pending: 0,
             separator: default_separator(),
+            chunk_interval_secs: default_chunk_interval(),
         }
     }
 }

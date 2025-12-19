@@ -31,3 +31,6 @@ logs/
 # Config with secrets
 config.toml
 !config.example.toml
+
+# Internal docs
+COMPETITORS.md

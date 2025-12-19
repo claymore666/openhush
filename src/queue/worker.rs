@@ -1,0 +1,179 @@
+//! Background transcription worker.
+//!
+//! Runs in a dedicated thread to avoid blocking the main async loop.
+//! Receives jobs from a channel, processes them with Whisper, and sends
+//! results back for ordered output.
+
+use crate::config::AudioConfig;
+use crate::engine::WhisperEngine;
+use crate::input::AudioBuffer;
+use tokio::sync::mpsc;
+use tracing::{debug, error, info};
+
+use super::{TranscriptionJob, TranscriptionResult};
+
+/// Background transcription worker.
+///
+/// Runs in a dedicated thread with blocking receives to avoid async
+/// overhead in the GPU transcription path.
+pub struct TranscriptionWorker {
+    /// Whisper engine for transcription
+    engine: WhisperEngine,
+    /// Channel to receive jobs
+    job_rx: mpsc::Receiver<TranscriptionJob>,
+    /// Channel to send results
+    result_tx: mpsc::Sender<TranscriptionResult>,
+    /// Audio preprocessing config
+    audio_config: AudioConfig,
+}
+
+impl TranscriptionWorker {
+    /// Create a new transcription worker.
+    ///
+    /// # Arguments
+    /// * `engine` - Pre-loaded Whisper engine
+    /// * `job_rx` - Channel to receive transcription jobs
+    /// * `result_tx` - Channel to send completed results
+    /// * `audio_config` - Audio preprocessing configuration
+    pub fn new(
+        engine: WhisperEngine,
+        job_rx: mpsc::Receiver<TranscriptionJob>,
+        result_tx: mpsc::Sender<TranscriptionResult>,
+        audio_config: AudioConfig,
+    ) -> Self {
+        Self {
+            engine,
+            job_rx,
+            result_tx,
+            audio_config,
+        }
+    }
+
+    /// Run the worker loop (blocking, runs in dedicated thread).
+    ///
+    /// This method blocks on receiving jobs and runs until the channel is closed.
+    /// It should be spawned in a dedicated thread:
+    ///
+    /// ```ignore
+    /// std::thread::spawn(move || worker.run());
+    /// ```
+    pub fn run(mut self) {
+        info!("Transcription worker started");
+
+        while let Some(job) = self.job_rx.blocking_recv() {
+            let sequence_id = job.sequence_id;
+            let total_start = std::time::Instant::now();
+            debug!(
+                "Processing transcription job (sequence_id: {})",
+                sequence_id
+            );
+
+            // Preprocess audio
+            let preprocess_start = std::time::Instant::now();
+            let mut buffer = job.buffer;
+            let audio_duration_secs = buffer.duration_secs();
+            Self::preprocess_audio(&mut buffer, &self.audio_config);
+            let preprocess_ms = preprocess_start.elapsed().as_millis();
+
+            // Transcribe
+            let transcribe_start = std::time::Instant::now();
+            let text = match self.engine.transcribe(&buffer) {
+                Ok(result) => result.text,
+                Err(e) => {
+                    error!("Transcription failed (sequence_id: {}): {}", sequence_id, e);
+                    String::new()
+                }
+            };
+            let transcribe_ms = transcribe_start.elapsed().as_millis();
+            let total_ms = total_start.elapsed().as_millis();
+
+            // Log timing breakdown
+            info!(
+                "⏱️  Timing (seq {}.{}{}): audio={:.1}s | preprocess={}ms | transcribe={}ms | total={}ms | ratio={:.2}x",
+                sequence_id,
+                job.chunk_id,
+                if job.is_final { " FINAL" } else { "" },
+                audio_duration_secs,
+                preprocess_ms,
+                transcribe_ms,
+                total_ms,
+                total_ms as f32 / (audio_duration_secs * 1000.0)
+            );
+
+            // Send result
+            let result = TranscriptionResult {
+                text,
+                sequence_id,
+                chunk_id: job.chunk_id,
+                is_final: job.is_final,
+            };
+            if self.result_tx.blocking_send(result).is_err() {
+                debug!("Result channel closed, worker shutting down");
+                break;
+            }
+        }
+
+        info!("Transcription worker stopped");
+    }
+
+    /// Apply audio preprocessing (normalization, compression, limiter).
+    fn preprocess_audio(buffer: &mut AudioBuffer, config: &AudioConfig) {
+        if !config.preprocessing {
+            return;
+        }
+
+        let rms_before = buffer.rms_db();
+        debug!("Preprocessing audio (input RMS: {:.1} dB)", rms_before);
+
+        // 1. RMS Normalization
+        if config.normalization.enabled {
+            buffer.normalize_rms(config.normalization.target_db);
+        }
+
+        // 2. Dynamic Compression
+        if config.compression.enabled {
+            buffer.compress(
+                config.compression.threshold_db,
+                config.compression.ratio,
+                config.compression.attack_ms,
+                config.compression.release_ms,
+                config.compression.makeup_gain_db,
+            );
+        }
+
+        // 3. Limiter (safety net)
+        if config.limiter.enabled {
+            buffer.limit(config.limiter.ceiling_db, config.limiter.release_ms);
+        }
+
+        let rms_after = buffer.rms_db();
+        info!(
+            "Audio preprocessed: {:.1} dB -> {:.1} dB",
+            rms_before, rms_after
+        );
+    }
+}
+
+/// Spawn a transcription worker in a dedicated thread.
+///
+/// Returns a handle to the thread for optional join on shutdown.
+///
+/// # Arguments
+/// * `engine` - Pre-loaded Whisper engine
+/// * `job_rx` - Channel to receive transcription jobs
+/// * `result_tx` - Channel to send completed results
+/// * `audio_config` - Audio preprocessing configuration
+pub fn spawn_worker(
+    engine: WhisperEngine,
+    job_rx: mpsc::Receiver<TranscriptionJob>,
+    result_tx: mpsc::Sender<TranscriptionResult>,
+    audio_config: AudioConfig,
+) -> std::thread::JoinHandle<()> {
+    std::thread::Builder::new()
+        .name("transcription-worker".to_string())
+        .spawn(move || {
+            let worker = TranscriptionWorker::new(engine, job_rx, result_tx, audio_config);
+            worker.run();
+        })
+        .expect("Failed to spawn transcription worker thread")
+}

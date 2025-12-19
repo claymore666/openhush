@@ -9,6 +9,7 @@ mod gui;
 mod input;
 mod output;
 mod platform;
+mod queue;
 mod tray;
 
 #[derive(Parser)]

@@ -144,7 +144,7 @@ pub fn parse_key(key_str: &str) -> Result<Key, HotkeyListenerError> {
         "controlleft" | "ctrll" | "ctrlleft" | "lctrl" | "ctrl" => Ok(Key::ControlLeft),
 
         // Alt keys
-        "altright" | "altr" | "ralt" => Ok(Key::Alt), // rdev uses Alt for AltRight
+        "altright" | "altr" | "ralt" | "altgr" => Ok(Key::AltGr), // Right Alt / AltGr
         "altleft" | "altl" | "lalt" | "alt" => Ok(Key::Alt),
 
         // Shift keys

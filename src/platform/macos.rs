@@ -5,14 +5,17 @@
 use super::{
     AudioFeedback, HotkeyEvent, HotkeyHandler, Notifier, Platform, PlatformError, TextOutput,
 };
+use enigo::{Enigo, KeyboardControllable};
 
 pub struct MacOSPlatform {
-    // TODO: Add macOS-specific state
+    enigo: Enigo,
 }
 
 impl MacOSPlatform {
     pub fn new() -> Result<Self, PlatformError> {
-        Ok(Self {})
+        Ok(Self {
+            enigo: Enigo::new(),
+        })
     }
 }
 
@@ -47,11 +50,9 @@ impl TextOutput for MacOSPlatform {
         ))
     }
 
-    fn paste_text(&self, _text: &str) -> Result<(), PlatformError> {
-        // TODO: Implement using enigo (CGEvent)
-        Err(PlatformError::NotSupported(
-            "macOS paste not yet implemented".into(),
-        ))
+    fn paste_text(&mut self, text: &str) -> Result<(), PlatformError> {
+        self.enigo.key_sequence(text);
+        Ok(())
     }
 }
 
