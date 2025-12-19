@@ -1,11 +1,12 @@
 //! Whisper transcription engine using whisper-rs.
 
 use crate::config::Config;
+use crate::engine::validation::{self, AudioValidationError};
 use crate::input::AudioBuffer;
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 use whisper_rs::{
     FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperState,
 };
@@ -23,6 +24,9 @@ pub enum WhisperError {
 
     #[error("Invalid audio: {0}")]
     InvalidAudio(String),
+
+    #[error("Audio validation failed: {0}")]
+    ValidationFailed(#[from] AudioValidationError),
 }
 
 /// Result of transcription
@@ -183,8 +187,27 @@ impl WhisperEngine {
 
     /// Transcribe audio buffer to text
     pub fn transcribe(&self, audio: &AudioBuffer) -> Result<TranscriptionResult, WhisperError> {
-        if audio.samples.is_empty() {
-            return Err(WhisperError::InvalidAudio("Empty audio buffer".into()));
+        // Validate audio before FFI boundary
+        let validation_info = validation::validate_audio(&audio.samples, audio.sample_rate)?;
+
+        debug!(
+            "Audio validated: {:.2}s, {} samples, RMS: {:.4}, range: [{:.3}, {:.3}]",
+            validation_info.duration_secs,
+            validation_info.sample_count,
+            validation_info.rms,
+            validation_info.min_value,
+            validation_info.max_value
+        );
+
+        // Warn if audio levels seem unusual
+        if validation_info.rms < 0.001 {
+            warn!("Audio appears to be silence or very quiet (RMS: {:.6})", validation_info.rms);
+        }
+        if validation_info.max_value.abs() > 1.0 || validation_info.min_value.abs() > 1.0 {
+            warn!(
+                "Audio samples outside normal range [-1, 1]: min={:.3}, max={:.3}",
+                validation_info.min_value, validation_info.max_value
+            );
         }
 
         let start_time = std::time::Instant::now();
