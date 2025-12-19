@@ -71,7 +71,6 @@ jobs:
 
       - name: Run cargo deny
         run: cargo deny check
-        continue-on-error: true  # Until deny.toml is configured
 
   # ===================
   # Tests
