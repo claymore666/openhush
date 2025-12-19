@@ -9,6 +9,9 @@ use tracing::{debug, info, warn};
 use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{TrayIcon, TrayIconBuilder};
 
+#[cfg(target_os = "linux")]
+use gtk;
+
 mod icon;
 
 pub use icon::create_icon;
@@ -61,6 +64,12 @@ impl TrayManager {
         #[cfg(target_os = "linux")]
         {
             if std::env::var("DISPLAY").is_err() && std::env::var("WAYLAND_DISPLAY").is_err() {
+                return Err(TrayError::NotSupported);
+            }
+
+            // Initialize GTK (required for tray menus on Linux)
+            if gtk::init().is_err() {
+                warn!("Failed to initialize GTK for system tray");
                 return Err(TrayError::NotSupported);
             }
         }

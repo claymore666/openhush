@@ -18,6 +18,9 @@ use std::path::PathBuf;
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
 
+#[cfg(target_os = "linux")]
+use gtk;
+
 #[derive(Error, Debug)]
 pub enum DaemonError {
     #[error("Config error: {0}")]
@@ -203,6 +206,14 @@ impl Daemon {
 
         // Main event loop
         loop {
+            // Process GTK events (required for tray icon on Linux)
+            #[cfg(target_os = "linux")]
+            if tray.is_some() {
+                while gtk::events_pending() {
+                    gtk::main_iteration_do(false);
+                }
+            }
+
             // Check for tray events (non-blocking)
             if let Some(ref tray) = tray {
                 if let Some(tray_event) = tray.try_recv() {

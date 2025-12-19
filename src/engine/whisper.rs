@@ -2,10 +2,11 @@
 
 use crate::config::Config;
 use crate::input::AudioBuffer;
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 use tracing::{debug, info};
-use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
+use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperState};
 
 #[derive(Error, Debug)]
 pub enum WhisperError {
@@ -93,9 +94,10 @@ impl WhisperModel {
     }
 }
 
-/// Whisper transcription engine
+/// Whisper transcription engine with cached state for fast inference
 pub struct WhisperEngine {
-    ctx: WhisperContext,
+    /// Cached state for reuse across transcriptions (avoids GPU buffer reallocation)
+    state: RefCell<WhisperState>,
     language: String,
     translate: bool,
 }
@@ -105,6 +107,8 @@ impl WhisperEngine {
     ///
     /// If `translate` is true, all audio will be translated to English.
     /// If false, audio will be transcribed in its original language.
+    ///
+    /// The engine pre-allocates GPU buffers for fast transcription.
     pub fn new(model_path: &Path, language: &str, translate: bool) -> Result<Self, WhisperError> {
         info!("Loading Whisper model from: {}", model_path.display());
 
@@ -128,10 +132,19 @@ impl WhisperEngine {
         let ctx = WhisperContext::new_with_params(model_path.to_str().unwrap_or_default(), params)
             .map_err(|e| WhisperError::LoadFailed(format!("{:?}", e)))?;
 
-        info!("Whisper model loaded successfully");
+        // Leak the context so the state can reference it for the daemon's lifetime
+        let ctx: &'static WhisperContext = Box::leak(Box::new(ctx));
+
+        // Pre-create state to allocate GPU buffers once
+        info!("Pre-allocating GPU buffers...");
+        let state = ctx
+            .create_state()
+            .map_err(|e| WhisperError::LoadFailed(format!("Failed to create state: {:?}", e)))?;
+
+        info!("Whisper model loaded and GPU buffers allocated");
 
         Ok(Self {
-            ctx,
+            state: RefCell::new(state),
             language: language.to_string(),
             translate,
         })
@@ -168,11 +181,8 @@ impl WhisperEngine {
             audio.samples.len()
         );
 
-        // Create transcription state
-        let mut state = self
-            .ctx
-            .create_state()
-            .map_err(|e| WhisperError::TranscriptionFailed(format!("{:?}", e)))?;
+        // Use cached state (GPU buffers already allocated)
+        let mut state = self.state.borrow_mut();
 
         // Configure parameters
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });

@@ -21,13 +21,14 @@ pub fn run_preferences() -> anyhow::Result<()> {
     .map_err(|e| anyhow::anyhow!("Failed to run preferences: {}", e))
 }
 
-/// Spawn preferences window in a separate thread (for use from daemon)
+/// Spawn preferences window as a separate process (for use from daemon)
 pub fn spawn_preferences() {
-    std::thread::spawn(|| {
-        if let Err(e) = run_preferences() {
-            tracing::error!("Preferences window error: {}", e);
-        }
-    });
+    // Launch a new process because GUI frameworks require the main thread
+    let exe = std::env::current_exe().unwrap_or_else(|_| "openhush".into());
+    match std::process::Command::new(exe).arg("preferences").spawn() {
+        Ok(_) => tracing::info!("Preferences window spawned"),
+        Err(e) => tracing::error!("Failed to spawn preferences: {}", e),
+    }
 }
 
 struct PreferencesApp {
