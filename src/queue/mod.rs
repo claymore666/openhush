@@ -259,15 +259,11 @@ mod tests {
         // Add result for seq 0
         tracker.add_result(result(0, 0, "first", true));
 
-        // Now seq 0 is ready
+        // Now both seq 0 and seq 1 are ready (consecutive)
         let ready = tracker.take_ready();
-        assert_eq!(ready.len(), 1);
+        assert_eq!(ready.len(), 2);
         assert_eq!(ready[0].text, "first");
-
-        // And seq 1
-        let ready = tracker.take_ready();
-        assert_eq!(ready.len(), 1);
-        assert_eq!(ready[0].text, "second");
+        assert_eq!(ready[1].text, "second");
     }
 
     #[test]
