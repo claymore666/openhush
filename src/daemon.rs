@@ -26,6 +26,9 @@ use tracing::{debug, error, info, warn};
 #[allow(clippy::single_component_path_imports)]
 use gtk;
 
+#[cfg(unix)]
+use daemonize::Daemonize;
+
 /// Channel buffer size for job and result queues
 const CHANNEL_BUFFER_SIZE: usize = 32;
 
@@ -57,6 +60,10 @@ pub enum DaemonError {
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+
+    #[cfg(unix)]
+    #[error("Daemonization failed: {0}")]
+    DaemonizeFailed(String),
 }
 
 /// Daemon state machine
@@ -230,8 +237,8 @@ impl Daemon {
         let (hotkey_listener, mut hotkey_rx) = HotkeyListener::new(&self.config.hotkey.key)?;
         hotkey_listener.start()?;
 
-        // Chunk separator (space by default)
-        let chunk_separator = &self.config.queue.separator;
+        // Chunk separator (space by default) - cloned to allow config reload
+        let mut chunk_separator = self.config.queue.separator.clone();
 
         // Streaming chunk interval (convert to Duration)
         let chunk_interval = if chunk_interval_secs > 0.0 {
@@ -256,8 +263,41 @@ impl Daemon {
             self.config.hotkey.key
         );
 
+        // Set up Unix signal handlers (SIGTERM, SIGHUP)
+        #[cfg(unix)]
+        let (mut sigterm, mut sighup) = setup_signal_handlers();
+
         // Main event loop
         loop {
+            // Poll Unix signals (non-blocking, at start of loop)
+            #[cfg(unix)]
+            {
+                // Use try_recv pattern via select with zero timeout
+                tokio::select! {
+                    biased;
+                    _ = sigterm.recv() => {
+                        info!("Shutdown signal received (SIGTERM)");
+                        break;
+                    }
+                    _ = sighup.recv() => {
+                        info!("SIGHUP received, reloading configuration...");
+                        match Config::load() {
+                            Ok(new_config) => {
+                                chunk_separator = new_config.queue.separator.clone();
+                                self.config = new_config;
+                                info!("Configuration reloaded successfully");
+                            }
+                            Err(e) => {
+                                error!("Failed to reload configuration: {}", e);
+                            }
+                        }
+                        continue; // Don't break, continue with new config
+                    }
+                    // Immediate timeout to make this non-blocking
+                    _ = tokio::time::sleep(std::time::Duration::ZERO) => {}
+                }
+            }
+
             // Process GTK events and tray (Linux only)
             #[cfg(target_os = "linux")]
             {
@@ -480,11 +520,12 @@ impl Daemon {
                     }
                 }
 
-                // Handle shutdown signal
+                // Handle shutdown signal (Ctrl+C)
                 _ = tokio::signal::ctrl_c() => {
-                    info!("Shutdown signal received");
+                    info!("Shutdown signal received (SIGINT)");
                     break;
                 }
+
 
                 // Small sleep to prevent busy loop when checking tray
                 _ = tokio::time::sleep(tokio::time::Duration::from_millis(10)) => {}
@@ -497,6 +538,24 @@ impl Daemon {
         info!("Daemon stopped");
         Ok(())
     }
+}
+
+/// Set up Unix signal handlers for the daemon
+///
+/// This is called from run_loop to set up SIGTERM and SIGHUP handling.
+#[cfg(unix)]
+pub fn setup_signal_handlers() -> (
+    tokio::signal::unix::Signal,
+    tokio::signal::unix::Signal,
+) {
+    use tokio::signal::unix::{signal, SignalKind};
+
+    let sigterm = signal(SignalKind::terminate())
+        .expect("Failed to install SIGTERM handler");
+    let sighup = signal(SignalKind::hangup())
+        .expect("Failed to install SIGHUP handler");
+
+    (sigterm, sighup)
 }
 
 /// Get the PID file path
@@ -553,6 +612,9 @@ fn remove_pid() -> Result<(), DaemonError> {
 
 /// Start the daemon
 pub async fn run(foreground: bool, enable_tray: bool) -> Result<(), DaemonError> {
+    // Check for stale PID file and clean up if needed
+    check_and_cleanup_stale_pid()?;
+
     if is_running() {
         return Err(DaemonError::AlreadyRunning);
     }
@@ -560,7 +622,14 @@ pub async fn run(foreground: bool, enable_tray: bool) -> Result<(), DaemonError>
     let config = Config::load()?;
 
     if !foreground {
-        warn!("Background mode not yet implemented, running in foreground");
+        #[cfg(unix)]
+        {
+            daemonize_process()?;
+        }
+        #[cfg(not(unix))]
+        {
+            warn!("Background mode not supported on this platform, running in foreground");
+        }
     }
 
     write_pid()?;
@@ -571,6 +640,88 @@ pub async fn run(foreground: bool, enable_tray: bool) -> Result<(), DaemonError>
     remove_pid()?;
 
     result
+}
+
+/// Perform Unix daemonization using the daemonize crate
+#[cfg(unix)]
+fn daemonize_process() -> Result<(), DaemonError> {
+    use std::fs::File;
+
+    // Get log directory for stdout/stderr redirection
+    let log_dir = Config::data_dir().map_err(|e| DaemonError::DaemonizeFailed(e.to_string()))?;
+    let _ = std::fs::create_dir_all(&log_dir);
+
+    // Create stdout/stderr files for daemon output
+    let stdout_path = log_dir.join("daemon.out");
+    let stderr_path = log_dir.join("daemon.err");
+
+    let stdout = File::create(&stdout_path)
+        .map_err(|e| DaemonError::DaemonizeFailed(format!("Cannot create stdout file: {}", e)))?;
+    let stderr = File::create(&stderr_path)
+        .map_err(|e| DaemonError::DaemonizeFailed(format!("Cannot create stderr file: {}", e)))?;
+
+    // Print before forking so user sees the message
+    println!("Daemonizing OpenHush (logs: {:?})...", log_dir);
+
+    // Note: We don't use daemonize's pid_file feature because we manage it ourselves
+    // with atomic creation and proper cleanup
+    let daemonize = Daemonize::new()
+        .working_directory("/")
+        .stdout(stdout)
+        .stderr(stderr);
+
+    daemonize.start().map_err(|e| {
+        DaemonError::DaemonizeFailed(format!("Fork failed: {}", e))
+    })?;
+
+    // At this point, the parent has exited and we're in the child process
+    // The user will see "Daemonizing..." then their shell prompt returns
+
+    // If we get here, we're in the child process
+    info!("Daemonized successfully (PID: {})", std::process::id());
+
+    Ok(())
+}
+
+/// Check for stale PID file and clean up if the process is no longer running
+fn check_and_cleanup_stale_pid() -> Result<(), DaemonError> {
+    let path = match pid_file() {
+        Ok(p) => p,
+        Err(_) => return Ok(()), // No PID file path available, nothing to clean up
+    };
+
+    if !path.exists() {
+        return Ok(());
+    }
+
+    let pid_str = match std::fs::read_to_string(&path) {
+        Ok(s) => s,
+        Err(_) => return Ok(()), // Can't read, probably doesn't exist
+    };
+
+    let pid: i32 = match pid_str.trim().parse() {
+        Ok(p) => p,
+        Err(_) => {
+            // Invalid PID file content, remove it
+            warn!("Removing invalid PID file");
+            let _ = std::fs::remove_file(&path);
+            return Ok(());
+        }
+    };
+
+    // Check if process is actually running
+    #[cfg(unix)]
+    {
+        // SAFETY: kill(pid, 0) is safe - only checks if process exists
+        let result = unsafe { libc::kill(pid, 0) };
+        if result != 0 {
+            // Process not running, this is a stale PID file
+            warn!("Removing stale PID file (process {} no longer running)", pid);
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+
+    Ok(())
 }
 
 /// Stop the daemon

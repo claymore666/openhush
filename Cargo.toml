@@ -62,6 +62,7 @@ dirs = "5"
 # Unix process management
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+daemonize = "0.5"
 
 # Notifications
 notify-rust = "4"
