@@ -34,3 +34,7 @@ config.toml
 
 # Internal docs
 COMPETITORS.md
+AREA_FOR_IMPROVEMENTS.md
+
+# Claude Code
+.claude/
