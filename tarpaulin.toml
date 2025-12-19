@@ -1,0 +1,14 @@
+# cargo-tarpaulin configuration
+# https://github.com/xd009642/tarpaulin
+
+[report]
+out = ["xml", "html"]
+
+[run]
+ignore-tests = true
+exclude-files = ["tests/*", "benches/*", "build.rs"]
+
+# Target for coverage
+[coverage]
+# Uncomment to fail if coverage drops below threshold
+# fail-under = 50
