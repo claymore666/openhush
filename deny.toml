@@ -4,10 +4,10 @@
 [advisories]
 db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
-vulnerability = "deny"
-unmaintained = "warn"
+# Unmaintained crates - only warn for workspace deps (direct dependencies)
+unmaintained = "workspace"
+# Yanked crates - warn but don't fail
 yanked = "warn"
-notice = "warn"
 
 [licenses]
 unlicensed = "deny"
