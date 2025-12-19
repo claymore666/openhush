@@ -5,6 +5,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilte
 mod config;
 mod daemon;
 mod engine;
+mod panic_handler;
 #[cfg(target_os = "linux")]
 mod gui;
 mod input;
@@ -125,6 +126,9 @@ fn init_logging(verbose: bool) {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Install panic handler first, before anything else
+    panic_handler::install();
+
     let cli = Cli::parse();
     init_logging(cli.verbose);
 

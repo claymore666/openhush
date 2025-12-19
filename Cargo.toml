@@ -51,6 +51,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 thiserror = "2"
 anyhow = "1"
 
+# Time/date for crash reports
+chrono = "0.4"
+
 # Platform paths (XDG on Linux, native elsewhere)
 directories = "5"
 dirs = "5"
