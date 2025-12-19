@@ -133,7 +133,9 @@ impl AudioRingBuffer {
     /// # Safety
     /// This method must only be called from a single producer thread.
     pub fn push_samples(&self, samples: &[f32]) {
-        let write = self.write_pos.load(Ordering::Relaxed);
+        // Use Acquire to ensure proper memory ordering with Release store below.
+        // This ensures samples written before the store are visible to consumers.
+        let write = self.write_pos.load(Ordering::Acquire);
 
         // SAFETY: Single producer, we own the write position
         let buffer = unsafe { &mut *self.buffer.get() };

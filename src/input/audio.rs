@@ -795,8 +795,7 @@ pub fn has_input_device() -> bool {
 #[allow(dead_code)]
 pub fn default_device_name() -> Option<String> {
     let host = cpal::default_host();
-    host.default_input_device()
-        .and_then(|d| d.name().ok())
+    host.default_input_device().and_then(|d| d.name().ok())
 }
 
 /// Simple linear resampling

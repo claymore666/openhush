@@ -69,7 +69,10 @@ impl Default for LinuxPlatform {
         // for forward compatibility if initialization becomes fallible.
         Self::new().unwrap_or_else(|e| {
             // Log the error and create a minimal fallback
-            eprintln!("Warning: LinuxPlatform initialization failed: {}. Using fallback.", e);
+            eprintln!(
+                "Warning: LinuxPlatform initialization failed: {}. Using fallback.",
+                e
+            );
             Self {
                 display_server: super::DisplayServer::Tty,
                 clipboard: std::sync::Mutex::new(None),

@@ -18,6 +18,9 @@ pub enum ConfigError {
 
     #[error("Failed to serialize config: {0}")]
     SerializeError(#[from] toml::ser::Error),
+
+    #[error("Invalid configuration: {0}")]
+    ValidationError(String),
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -114,6 +117,19 @@ pub struct FeedbackConfig {
     pub visual: bool,
 }
 
+/// Backpressure strategy when transcription queue is full
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum BackpressureStrategy {
+    /// Log warning but accept the job anyway (may cause unbounded growth)
+    #[default]
+    Warn,
+    /// Drop the oldest pending job to make room for new ones
+    DropOldest,
+    /// Reject new jobs when queue is full
+    DropNewest,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct QueueConfig {
     /// Max pending recordings (0 = unlimited)
@@ -124,9 +140,9 @@ pub struct QueueConfig {
     #[serde(default = "default_high_water_mark")]
     pub high_water_mark: u32,
 
-    /// Backpressure strategy: "drop_oldest", "drop_newest", "warn"
-    #[serde(default = "default_backpressure_strategy")]
-    pub backpressure_strategy: String,
+    /// Backpressure strategy when queue is full
+    #[serde(default)]
+    pub backpressure_strategy: BackpressureStrategy,
 
     /// Whether to show notification on backpressure
     #[serde(default)]
@@ -295,10 +311,6 @@ fn default_high_water_mark() -> u32 {
     8 // Warn when queue reaches this depth
 }
 
-fn default_backpressure_strategy() -> String {
-    "warn".to_string() // Just warn, don't drop
-}
-
 fn default_chunk_interval() -> f32 {
     0.0 // 0 means auto-tune based on GPU benchmark
 }
@@ -401,7 +413,7 @@ impl Default for QueueConfig {
         Self {
             max_pending: default_max_pending(),
             high_water_mark: default_high_water_mark(),
-            backpressure_strategy: default_backpressure_strategy(),
+            backpressure_strategy: BackpressureStrategy::default(),
             notify_on_backpressure: false,
             separator: default_separator(),
             chunk_interval_secs: default_chunk_interval(),
@@ -478,12 +490,63 @@ impl Config {
         if path.exists() {
             let contents = fs::read_to_string(&path)?;
             let config: Config = toml::from_str(&contents)?;
+            config.validate()?;
             Ok(config)
         } else {
             let config = Config::default();
             config.save()?;
             Ok(config)
         }
+    }
+
+    /// Validate configuration values
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        // Validate audio prebuffer duration
+        if self.audio.prebuffer_duration_secs <= 0.0 {
+            return Err(ConfigError::ValidationError(
+                "prebuffer_duration_secs must be positive".into(),
+            ));
+        }
+        if self.audio.prebuffer_duration_secs > 300.0 {
+            return Err(ConfigError::ValidationError(
+                "prebuffer_duration_secs cannot exceed 300 seconds".into(),
+            ));
+        }
+
+        // Validate chunk safety margin
+        if self.queue.chunk_safety_margin < 0.0 || self.queue.chunk_safety_margin > 2.0 {
+            return Err(ConfigError::ValidationError(
+                "chunk_safety_margin must be between 0.0 and 2.0".into(),
+            ));
+        }
+
+        // Validate model name doesn't contain path traversal
+        if self.transcription.model.contains("..") || self.transcription.model.contains('/') {
+            return Err(ConfigError::ValidationError(
+                "model name contains invalid characters".into(),
+            ));
+        }
+
+        // Validate audio processing parameters
+        if self.audio.normalization.target_db > 0.0 {
+            return Err(ConfigError::ValidationError(
+                "normalization target_db must be negative (in dB)".into(),
+            ));
+        }
+
+        if self.audio.compression.ratio < 1.0 {
+            return Err(ConfigError::ValidationError(
+                "compression ratio must be >= 1.0".into(),
+            ));
+        }
+
+        if self.audio.limiter.ceiling_db > 0.0 {
+            return Err(ConfigError::ValidationError(
+                "limiter ceiling_db must be negative (in dB)".into(),
+            ));
+        }
+
+        Ok(())
     }
 
     /// Save config to file

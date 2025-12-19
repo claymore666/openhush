@@ -39,21 +39,18 @@ fn handle_panic(info: &PanicHookInfo) {
     // Print to stderr (in case someone is watching)
     eprintln!("{}", crash_report);
 
-    // Write to crash log file
+    // Write to crash log file (append mode to preserve history)
     if let Some(path) = crash_report_path() {
         if let Some(parent) = path.parent() {
             let _ = fs::create_dir_all(parent);
         }
 
-        if let Ok(mut file) = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(&path)
-        {
+        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&path) {
+            // Add separator between crash reports
+            let _ = file.write_all(b"\n\n========================================\n\n");
             let _ = file.write_all(crash_report.as_bytes());
             let _ = file.flush();
-            eprintln!("\nCrash report written to: {}", path.display());
+            eprintln!("\nCrash report appended to: {}", path.display());
         }
     }
 }

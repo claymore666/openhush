@@ -198,7 +198,10 @@ impl WhisperEngine {
 
         // Warn if audio levels seem unusual
         if validation_info.rms < 0.001 {
-            warn!("Audio appears to be silence or very quiet (RMS: {:.6})", validation_info.rms);
+            warn!(
+                "Audio appears to be silence or very quiet (RMS: {:.6})",
+                validation_info.rms
+            );
         }
         if validation_info.max_value.abs() > 1.0 || validation_info.min_value.abs() > 1.0 {
             warn!(

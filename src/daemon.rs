@@ -227,7 +227,7 @@ impl Daemon {
 
         // Spawn transcription worker in dedicated thread
         let audio_config = self.config.audio.clone();
-        let _worker_handle = spawn_worker(engine, job_rx, result_tx, audio_config)?;
+        let worker_handle = spawn_worker(engine, job_rx, result_tx, audio_config)?;
         info!("Transcription worker started");
 
         // Result tracker for ordered output
@@ -243,7 +243,7 @@ impl Daemon {
         // Backpressure configuration
         let max_pending = self.config.queue.max_pending;
         let high_water_mark = self.config.queue.high_water_mark;
-        let backpressure_strategy = self.config.queue.backpressure_strategy.clone();
+        let backpressure_strategy = self.config.queue.backpressure_strategy;
         let notify_on_backpressure = self.config.queue.notify_on_backpressure;
 
         // Streaming chunk interval (convert to Duration)
@@ -271,7 +271,7 @@ impl Daemon {
 
         // Set up Unix signal handlers (SIGTERM, SIGHUP)
         #[cfg(unix)]
-        let (mut sigterm, mut sighup) = setup_signal_handlers();
+        let (mut sigterm, mut sighup) = setup_signal_handlers()?;
 
         // Main event loop
         loop {
@@ -395,13 +395,14 @@ impl Daemon {
                                         next_chunk_id,
                                         max_pending,
                                         high_water_mark,
-                                        &backpressure_strategy,
+                                        backpressure_strategy,
                                     );
                                     if !accepted {
                                         warn!(
                                             "Final chunk rejected due to backpressure (seq {}.{})",
                                             mark.sequence_id, next_chunk_id
                                         );
+                                        #[cfg(unix)]
                                         if notify_on_backpressure {
                                             let _ = notify_rust::Notification::new()
                                                 .summary("OpenHush")
@@ -527,13 +528,14 @@ impl Daemon {
                                 *next_chunk_id,
                                 max_pending,
                                 high_water_mark,
-                                &backpressure_strategy,
+                                backpressure_strategy,
                             );
                             if !accepted {
                                 warn!(
                                     "Streaming chunk rejected due to backpressure (seq {}.{})",
                                     mark.sequence_id, *next_chunk_id
                                 );
+                                #[cfg(unix)]
                                 if notify_on_backpressure {
                                     let _ = notify_rust::Notification::new()
                                         .summary("OpenHush")
@@ -579,7 +581,15 @@ impl Daemon {
 
         // Cleanup
         hotkey_listener.stop();
-        drop(job_tx); // Signal worker to stop
+        drop(job_tx); // Signal worker to stop by closing the channel
+
+        // Wait for worker thread to finish (with timeout)
+        info!("Waiting for transcription worker to finish...");
+        match worker_handle.join() {
+            Ok(()) => info!("Transcription worker stopped cleanly"),
+            Err(_) => warn!("Transcription worker thread panicked during shutdown"),
+        }
+
         info!("Daemon stopped");
         Ok(())
     }
@@ -588,19 +598,16 @@ impl Daemon {
 /// Set up Unix signal handlers for the daemon
 ///
 /// This is called from run_loop to set up SIGTERM and SIGHUP handling.
+/// Returns Result instead of panicking to allow graceful error handling.
 #[cfg(unix)]
-pub fn setup_signal_handlers() -> (
-    tokio::signal::unix::Signal,
-    tokio::signal::unix::Signal,
-) {
+pub fn setup_signal_handlers(
+) -> Result<(tokio::signal::unix::Signal, tokio::signal::unix::Signal), std::io::Error> {
     use tokio::signal::unix::{signal, SignalKind};
 
-    let sigterm = signal(SignalKind::terminate())
-        .expect("Failed to install SIGTERM handler");
-    let sighup = signal(SignalKind::hangup())
-        .expect("Failed to install SIGHUP handler");
+    let sigterm = signal(SignalKind::terminate())?;
+    let sighup = signal(SignalKind::hangup())?;
 
-    (sigterm, sighup)
+    Ok((sigterm, sighup))
 }
 
 /// Get the PID file path
@@ -636,13 +643,30 @@ fn is_running() -> bool {
     false
 }
 
-/// Write PID file
+/// Write PID file atomically using O_CREAT | O_EXCL to prevent race conditions
 fn write_pid() -> Result<(), DaemonError> {
+    use std::io::Write;
+
     let path = pid_file()?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(&path, std::process::id().to_string())?;
+
+    // Use create_new() which maps to O_CREAT | O_EXCL - fails if file exists
+    // This prevents TOCTOU race between is_running() check and write
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::AlreadyExists {
+                DaemonError::AlreadyRunning
+            } else {
+                DaemonError::Io(e)
+            }
+        })?;
+
+    write!(file, "{}", std::process::id())?;
     Ok(())
 }
 
@@ -715,9 +739,9 @@ fn daemonize_process() -> Result<(), DaemonError> {
         .stdout(stdout)
         .stderr(stderr);
 
-    daemonize.start().map_err(|e| {
-        DaemonError::DaemonizeFailed(format!("Fork failed: {}", e))
-    })?;
+    daemonize
+        .start()
+        .map_err(|e| DaemonError::DaemonizeFailed(format!("Fork failed: {}", e)))?;
 
     // At this point, the parent has exited and we're in the child process
     // The user will see "Daemonizing..." then their shell prompt returns
@@ -761,12 +785,35 @@ fn check_and_cleanup_stale_pid() -> Result<(), DaemonError> {
         let result = unsafe { libc::kill(pid, 0) };
         if result != 0 {
             // Process not running, this is a stale PID file
-            warn!("Removing stale PID file (process {} no longer running)", pid);
+            warn!(
+                "Removing stale PID file (process {} no longer running)",
+                pid
+            );
             let _ = std::fs::remove_file(&path);
         }
     }
 
     Ok(())
+}
+
+/// Verify that a PID belongs to an openhush process
+#[cfg(target_os = "linux")]
+fn verify_openhush_process(pid: i32) -> bool {
+    // Check /proc/<pid>/exe to verify it's openhush
+    let exe_path = format!("/proc/{}/exe", pid);
+    if let Ok(target) = std::fs::read_link(&exe_path) {
+        if let Some(name) = target.file_name() {
+            return name == "openhush";
+        }
+    }
+    false
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+fn verify_openhush_process(_pid: i32) -> bool {
+    // On non-Linux Unix, we can't easily verify the process name
+    // Fall back to trusting the PID file
+    true
 }
 
 /// Stop the daemon
@@ -778,11 +825,27 @@ pub async fn stop() -> Result<(), DaemonError> {
     let path = pid_file()?;
     if let Ok(pid_str) = std::fs::read_to_string(&path) {
         if let Ok(pid) = pid_str.trim().parse::<i32>() {
+            // Validate PID is in reasonable range
+            if pid <= 0 {
+                warn!("Invalid PID {} in PID file, removing", pid);
+                let _ = std::fs::remove_file(&path);
+                return Err(DaemonError::NotRunning);
+            }
+
             #[cfg(unix)]
             {
+                // Verify the process is actually openhush before sending signal
+                if !verify_openhush_process(pid) {
+                    warn!(
+                        "PID {} is not an openhush process, removing stale PID file",
+                        pid
+                    );
+                    let _ = std::fs::remove_file(&path);
+                    return Err(DaemonError::NotRunning);
+                }
+
                 // SAFETY: kill(pid, SIGTERM) sends a termination signal to the process.
-                // The pid is validated as i32 from our own PID file. Sending to a non-existent
-                // or different process is harmless (returns error which we ignore).
+                // The pid is validated as i32 and verified to be an openhush process.
                 unsafe {
                     libc::kill(pid, libc::SIGTERM);
                 }

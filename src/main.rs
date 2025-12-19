@@ -6,11 +6,11 @@ use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, Env
 mod config;
 mod daemon;
 mod engine;
-mod panic_handler;
 #[cfg(target_os = "linux")]
 mod gui;
 mod input;
 mod output;
+mod panic_handler;
 mod platform;
 mod queue;
 #[cfg(target_os = "linux")]
