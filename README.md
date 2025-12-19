@@ -77,7 +77,20 @@ paste = true
 [correction]
 enabled = false
 ollama_model = "llama3.2:3b"
+
+[queue]
+chunk_interval_secs = 0     # 0 = auto-tune based on GPU benchmark
+chunk_safety_margin = 0.2   # 20% safety margin for auto-tuned interval
 ```
+
+### Auto-tuned Streaming
+
+OpenHush automatically benchmarks your GPU at startup to determine the optimal chunk interval for streaming transcription. This ensures:
+- Fast feedback without chunks queuing up
+- Optimal performance across different GPUs (RTX 3090 → GTX 1060)
+- No manual tuning required
+
+Set `chunk_interval_secs = 5.0` (or another value) to override auto-tuning.
 
 ## Platforms
 

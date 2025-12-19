@@ -91,6 +91,15 @@ impl TranscriptionTracker {
             sequence_id,
             chunk_id
         );
+
+        // Warn if queue is growing (transcription falling behind)
+        let pending_count = self.pending.len();
+        if pending_count >= 3 {
+            tracing::warn!(
+                "Transcription queue has {} pending jobs - consider increasing chunk_interval_secs",
+                pending_count
+            );
+        }
     }
 
     /// Add a completed transcription result.

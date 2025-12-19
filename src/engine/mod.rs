@@ -2,4 +2,5 @@
 
 pub mod whisper;
 
-pub use whisper::{WhisperEngine, WhisperError};
+#[allow(unused_imports)]
+pub use whisper::{BenchmarkResult, WhisperEngine, WhisperError};

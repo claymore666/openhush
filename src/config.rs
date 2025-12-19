@@ -126,9 +126,19 @@ pub struct QueueConfig {
 
     /// Chunk interval for streaming transcription in seconds.
     /// During long recordings, audio is split into chunks and transcribed
-    /// in parallel for lower latency. Set to 0 to disable streaming.
+    /// in parallel for lower latency.
+    ///
+    /// Special values:
+    /// - `0` or negative: Auto-tune based on GPU benchmark at startup
+    /// - Positive value: Use this exact interval (in seconds)
     #[serde(default = "default_chunk_interval")]
     pub chunk_interval_secs: f32,
+
+    /// Safety margin for auto-tuned chunk interval (0.0 to 1.0).
+    /// The auto-tuned interval is: measured_overhead * (1 + safety_margin)
+    /// Default: 0.2 (20% margin)
+    #[serde(default = "default_chunk_safety_margin")]
+    pub chunk_safety_margin: f32,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -266,7 +276,11 @@ fn default_separator() -> String {
 }
 
 fn default_chunk_interval() -> f32 {
-    5.0 // seconds - emit chunks every 5 seconds for streaming transcription
+    0.0 // 0 means auto-tune based on GPU benchmark
+}
+
+fn default_chunk_safety_margin() -> f32 {
+    0.2 // 20% safety margin for auto-tuned chunk interval
 }
 
 fn default_true() -> bool {
@@ -364,6 +378,7 @@ impl Default for QueueConfig {
             max_pending: 0,
             separator: default_separator(),
             chunk_interval_secs: default_chunk_interval(),
+            chunk_safety_margin: default_chunk_safety_margin(),
         }
     }
 }

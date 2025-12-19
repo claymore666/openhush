@@ -166,6 +166,34 @@ impl Daemon {
             self.config.transcription.translate, self.config.transcription.device
         );
 
+        // Determine chunk interval (auto-tune or configured)
+        let configured_interval = self.config.queue.chunk_interval_secs;
+        let chunk_interval_secs = if configured_interval <= 0.0 {
+            // Auto-tune mode: run GPU benchmark to determine optimal interval
+            match engine.benchmark(self.config.queue.chunk_safety_margin) {
+                Ok(result) => {
+                    info!(
+                        "Auto-tuned chunk interval: {:.2}s (GPU overhead: {:.2}s)",
+                        result.recommended_chunk_interval, result.overhead_secs
+                    );
+                    result.recommended_chunk_interval
+                }
+                Err(e) => {
+                    warn!(
+                        "GPU benchmark failed ({}), using fallback interval of 5.0s",
+                        e
+                    );
+                    5.0 // Fallback to safe default
+                }
+            }
+        } else {
+            info!(
+                "Using configured chunk interval: {:.2}s",
+                configured_interval
+            );
+            configured_interval
+        };
+
         if self.config.audio.preprocessing {
             info!(
                 "Audio preprocessing enabled (normalize={}, compress={}, limit={})",
@@ -206,7 +234,6 @@ impl Daemon {
         let chunk_separator = &self.config.queue.separator;
 
         // Streaming chunk interval (convert to Duration)
-        let chunk_interval_secs = self.config.queue.chunk_interval_secs;
         let chunk_interval = if chunk_interval_secs > 0.0 {
             Some(tokio::time::Duration::from_secs_f32(chunk_interval_secs))
         } else {

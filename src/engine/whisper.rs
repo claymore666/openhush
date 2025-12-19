@@ -261,6 +261,83 @@ impl WhisperEngine {
     }
 }
 
+/// Result of GPU benchmark
+#[derive(Debug, Clone)]
+pub struct BenchmarkResult {
+    /// Fixed overhead in seconds (time to process ~2s of audio)
+    pub overhead_secs: f32,
+    /// Recommended minimum chunk interval in seconds
+    pub recommended_chunk_interval: f32,
+    /// Audio duration used for benchmark
+    #[allow(dead_code)]
+    pub test_audio_secs: f32,
+}
+
+impl WhisperEngine {
+    /// Benchmark GPU transcription to determine optimal chunk interval.
+    ///
+    /// Transcribes a short silence buffer to measure the fixed overhead
+    /// of the transcription pipeline. This overhead is relatively constant
+    /// regardless of audio length, so it determines the minimum viable
+    /// chunk size for streaming.
+    ///
+    /// Returns the measured overhead and recommended chunk interval.
+    pub fn benchmark(&self, safety_margin: f32) -> Result<BenchmarkResult, WhisperError> {
+        use crate::input::AudioBuffer;
+
+        info!("Running GPU benchmark to determine optimal chunk interval...");
+
+        // Generate 2 seconds of silence for benchmarking
+        // This is enough to trigger full pipeline but short enough to be fast
+        let test_duration_secs = 2.0f32;
+        let sample_rate = 16000;
+        let num_samples = (test_duration_secs * sample_rate as f32) as usize;
+
+        // Create silence buffer (zeros)
+        let samples: Vec<f32> = vec![0.0; num_samples];
+        let audio = AudioBuffer {
+            samples,
+            sample_rate,
+        };
+
+        // Warm-up run (first run may have additional JIT overhead)
+        let _ = self.transcribe(&audio);
+
+        // Benchmark run (average of 3 runs for stability)
+        let mut total_ms: u64 = 0;
+        const BENCHMARK_RUNS: u32 = 3;
+
+        for i in 0..BENCHMARK_RUNS {
+            let start = std::time::Instant::now();
+            let _ = self.transcribe(&audio);
+            let elapsed = start.elapsed().as_millis() as u64;
+            total_ms += elapsed;
+            debug!("Benchmark run {}: {}ms", i + 1, elapsed);
+        }
+
+        let avg_ms = total_ms / BENCHMARK_RUNS as u64;
+        let overhead_secs = avg_ms as f32 / 1000.0;
+
+        // Calculate recommended chunk interval:
+        // min_chunk = overhead * (1 + safety_margin)
+        // This ensures chunks complete before the next one is ready
+        let recommended = overhead_secs * (1.0 + safety_margin);
+
+        info!(
+            "Benchmark complete: {:.2}s overhead, recommended chunk interval: {:.2}s (with {:.0}% margin)",
+            overhead_secs,
+            recommended,
+            safety_margin * 100.0
+        );
+
+        Ok(BenchmarkResult {
+            overhead_secs,
+            recommended_chunk_interval: recommended,
+            test_audio_secs: test_duration_secs,
+        })
+    }
+}
+
 /// Get the model directory path
 #[allow(dead_code)]
 pub fn models_dir() -> Result<PathBuf, WhisperError> {
