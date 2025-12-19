@@ -117,8 +117,20 @@ pub struct FeedbackConfig {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct QueueConfig {
     /// Max pending recordings (0 = unlimited)
-    #[serde(default)]
+    #[serde(default = "default_max_pending")]
     pub max_pending: u32,
+
+    /// High water mark - warn when queue reaches this depth
+    #[serde(default = "default_high_water_mark")]
+    pub high_water_mark: u32,
+
+    /// Backpressure strategy: "drop_oldest", "drop_newest", "warn"
+    #[serde(default = "default_backpressure_strategy")]
+    pub backpressure_strategy: String,
+
+    /// Whether to show notification on backpressure
+    #[serde(default)]
+    pub notify_on_backpressure: bool,
 
     /// Separator between transcriptions
     #[serde(default = "default_separator")]
@@ -275,6 +287,18 @@ fn default_separator() -> String {
     " ".to_string()
 }
 
+fn default_max_pending() -> u32 {
+    10 // Maximum pending chunks before backpressure kicks in
+}
+
+fn default_high_water_mark() -> u32 {
+    8 // Warn when queue reaches this depth
+}
+
+fn default_backpressure_strategy() -> String {
+    "warn".to_string() // Just warn, don't drop
+}
+
 fn default_chunk_interval() -> f32 {
     0.0 // 0 means auto-tune based on GPU benchmark
 }
@@ -375,7 +399,10 @@ impl Default for FeedbackConfig {
 impl Default for QueueConfig {
     fn default() -> Self {
         Self {
-            max_pending: 0,
+            max_pending: default_max_pending(),
+            high_water_mark: default_high_water_mark(),
+            backpressure_strategy: default_backpressure_strategy(),
+            notify_on_backpressure: false,
             separator: default_separator(),
             chunk_interval_secs: default_chunk_interval(),
             chunk_safety_margin: default_chunk_safety_margin(),

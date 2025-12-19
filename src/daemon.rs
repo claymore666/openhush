@@ -240,6 +240,12 @@ impl Daemon {
         // Chunk separator (space by default) - cloned to allow config reload
         let mut chunk_separator = self.config.queue.separator.clone();
 
+        // Backpressure configuration
+        let max_pending = self.config.queue.max_pending;
+        let high_water_mark = self.config.queue.high_water_mark;
+        let backpressure_strategy = self.config.queue.backpressure_strategy.clone();
+        let notify_on_backpressure = self.config.queue.notify_on_backpressure;
+
         // Streaming chunk interval (convert to Duration)
         let chunk_interval = if chunk_interval_secs > 0.0 {
             Some(tokio::time::Duration::from_secs_f32(chunk_interval_secs))
@@ -383,18 +389,36 @@ impl Daemon {
                                         next_chunk_id
                                     );
 
-                                    // Track pending transcription
-                                    tracker.add_pending(mark.sequence_id, next_chunk_id);
-
-                                    // Submit final job
-                                    let job = TranscriptionJob {
-                                        buffer,
-                                        sequence_id: mark.sequence_id,
-                                        chunk_id: next_chunk_id,
-                                        is_final: true,
-                                    };
-                                    if job_tx.send(job).await.is_err() {
-                                        error!("Failed to submit final transcription job");
+                                    // Track pending transcription with backpressure
+                                    let accepted = tracker.add_pending_with_config(
+                                        mark.sequence_id,
+                                        next_chunk_id,
+                                        max_pending,
+                                        high_water_mark,
+                                        &backpressure_strategy,
+                                    );
+                                    if !accepted {
+                                        warn!(
+                                            "Final chunk rejected due to backpressure (seq {}.{})",
+                                            mark.sequence_id, next_chunk_id
+                                        );
+                                        if notify_on_backpressure {
+                                            let _ = notify_rust::Notification::new()
+                                                .summary("OpenHush")
+                                                .body("Transcription queue full - audio dropped")
+                                                .show();
+                                        }
+                                    } else {
+                                        // Submit final job only if accepted
+                                        let job = TranscriptionJob {
+                                            buffer,
+                                            sequence_id: mark.sequence_id,
+                                            chunk_id: next_chunk_id,
+                                            is_final: true,
+                                        };
+                                        if job_tx.send(job).await.is_err() {
+                                            error!("Failed to submit final transcription job");
+                                        }
                                     }
                                 } else if next_chunk_id == 0 {
                                     // No chunks emitted and final chunk too short
@@ -497,23 +521,44 @@ impl Daemon {
                                 *next_chunk_id
                             );
 
-                            // Track pending transcription
-                            tracker.add_pending(mark.sequence_id, *next_chunk_id);
+                            // Track pending transcription with backpressure
+                            let accepted = tracker.add_pending_with_config(
+                                mark.sequence_id,
+                                *next_chunk_id,
+                                max_pending,
+                                high_water_mark,
+                                &backpressure_strategy,
+                            );
+                            if !accepted {
+                                warn!(
+                                    "Streaming chunk rejected due to backpressure (seq {}.{})",
+                                    mark.sequence_id, *next_chunk_id
+                                );
+                                if notify_on_backpressure {
+                                    let _ = notify_rust::Notification::new()
+                                        .summary("OpenHush")
+                                        .body("Transcription queue full - audio dropped")
+                                        .show();
+                                }
+                                // Skip submitting the job but still update state
+                                *last_chunk_pos = current_pos;
+                                *next_chunk_id += 1;
+                            } else {
+                                // Submit chunk job only if accepted
+                                let job = TranscriptionJob {
+                                    buffer,
+                                    sequence_id: mark.sequence_id,
+                                    chunk_id: *next_chunk_id,
+                                    is_final: false,
+                                };
+                                if job_tx.send(job).await.is_err() {
+                                    error!("Failed to submit chunk transcription job");
+                                }
 
-                            // Submit chunk job
-                            let job = TranscriptionJob {
-                                buffer,
-                                sequence_id: mark.sequence_id,
-                                chunk_id: *next_chunk_id,
-                                is_final: false,
-                            };
-                            if job_tx.send(job).await.is_err() {
-                                error!("Failed to submit chunk transcription job");
+                                // Update state for next chunk
+                                *last_chunk_pos = current_pos;
+                                *next_chunk_id += 1;
                             }
-
-                            // Update state for next chunk
-                            *last_chunk_pos = current_pos;
-                            *next_chunk_id += 1;
                         } else {
                             debug!("Chunk too short, skipping");
                         }
