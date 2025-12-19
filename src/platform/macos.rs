@@ -1,21 +1,21 @@
 //! macOS platform implementation
 //!
 //! Uses CGEvent for text input and native APIs for clipboard/notifications.
+//!
+//! NOTE: Full implementation pending. Currently returns NotSupported for most operations.
+//! The enigo crate's CGEventSource is not Send+Sync on macOS.
 
 use super::{
     AudioFeedback, HotkeyEvent, HotkeyHandler, Notifier, Platform, PlatformError, TextOutput,
 };
-use enigo::{Enigo, KeyboardControllable};
 
 pub struct MacOSPlatform {
-    enigo: Enigo,
+    // TODO: Add macOS-specific state when implemented
 }
 
 impl MacOSPlatform {
     pub fn new() -> Result<Self, PlatformError> {
-        Ok(Self {
-            enigo: Enigo::new(),
-        })
+        Ok(Self {})
     }
 }
 
@@ -50,9 +50,12 @@ impl TextOutput for MacOSPlatform {
         ))
     }
 
-    fn paste_text(&mut self, text: &str) -> Result<(), PlatformError> {
-        self.enigo.key_sequence(text);
-        Ok(())
+    fn paste_text(&self, _text: &str) -> Result<(), PlatformError> {
+        // TODO: Implement using enigo or CGEvent directly
+        // Note: enigo's CGEventSource is not Send+Sync, needs alternative approach
+        Err(PlatformError::NotSupported(
+            "macOS paste not yet implemented".into(),
+        ))
     }
 }
 

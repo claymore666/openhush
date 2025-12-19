@@ -9,11 +9,13 @@
 
 use crate::config::Config;
 use crate::engine::{WhisperEngine, WhisperError};
+#[cfg(target_os = "linux")]
 use crate::gui;
 use crate::input::{AudioMark, AudioRecorder, AudioRecorderError, HotkeyEvent, HotkeyListener};
 use crate::output::{OutputError, OutputHandler};
 use crate::platform::{CurrentPlatform, Platform};
 use crate::queue::{worker::spawn_worker, TranscriptionJob, TranscriptionTracker};
+#[cfg(target_os = "linux")]
 use crate::tray::{TrayEvent, TrayManager};
 use std::path::PathBuf;
 use thiserror::Error;
@@ -112,7 +114,8 @@ impl Daemon {
         info!("Hotkey: {}", self.config.hotkey.key);
         info!("Model: {}", self.config.transcription.model);
 
-        // Initialize system tray if enabled
+        // Initialize system tray if enabled (Linux only for now)
+        #[cfg(target_os = "linux")]
         let tray: Option<TrayManager> = if enable_tray {
             match TrayManager::new() {
                 Ok(t) => {
@@ -128,6 +131,13 @@ impl Daemon {
             info!("System tray disabled");
             None
         };
+
+        #[cfg(not(target_os = "linux"))]
+        let _tray_enabled = enable_tray; // Suppress unused warning
+        #[cfg(not(target_os = "linux"))]
+        if enable_tray {
+            info!("System tray not yet supported on this platform");
+        }
 
         // Check if model exists
         let model_path = self.model_path()?;
@@ -221,28 +231,31 @@ impl Daemon {
 
         // Main event loop
         loop {
-            // Process GTK events (required for tray icon on Linux)
+            // Process GTK events and tray (Linux only)
             #[cfg(target_os = "linux")]
-            if tray.is_some() {
-                while gtk::events_pending() {
-                    gtk::main_iteration_do(false);
+            {
+                // Process GTK events (required for tray icon on Linux)
+                if tray.is_some() {
+                    while gtk::events_pending() {
+                        gtk::main_iteration_do(false);
+                    }
                 }
-            }
 
-            // Check for tray events (non-blocking)
-            if let Some(ref tray) = tray {
-                if let Some(tray_event) = tray.try_recv() {
-                    match tray_event {
-                        TrayEvent::ShowPreferences => {
-                            info!("Opening preferences from tray");
-                            gui::spawn_preferences();
-                        }
-                        TrayEvent::Quit => {
-                            info!("Quit requested from tray");
-                            break;
-                        }
-                        TrayEvent::StatusClicked => {
-                            debug!("Status clicked");
+                // Check for tray events (non-blocking)
+                if let Some(ref tray) = &tray {
+                    if let Some(tray_event) = tray.try_recv() {
+                        match tray_event {
+                            TrayEvent::ShowPreferences => {
+                                info!("Opening preferences from tray");
+                                gui::spawn_preferences();
+                            }
+                            TrayEvent::Quit => {
+                                info!("Quit requested from tray");
+                                break;
+                            }
+                            TrayEvent::StatusClicked => {
+                                debug!("Status clicked");
+                            }
                         }
                     }
                 }

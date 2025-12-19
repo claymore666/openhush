@@ -5,11 +5,13 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilte
 mod config;
 mod daemon;
 mod engine;
+#[cfg(target_os = "linux")]
 mod gui;
 mod input;
 mod output;
 mod platform;
 mod queue;
+#[cfg(target_os = "linux")]
 mod tray;
 
 #[derive(Parser)]
@@ -137,7 +139,15 @@ async fn main() -> anyhow::Result<()> {
 
         Commands::Preferences => {
             info!("Opening preferences...");
-            gui::run_preferences()?;
+            #[cfg(target_os = "linux")]
+            {
+                gui::run_preferences()?;
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                eprintln!("Preferences GUI is only available on Linux in this release.");
+                eprintln!("Use 'openhush config --show' to view current settings.");
+            }
         }
 
         Commands::Stop => {
