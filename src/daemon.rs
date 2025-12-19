@@ -9,9 +9,11 @@
 
 use crate::config::{AudioConfig, Config};
 use crate::engine::{WhisperEngine, WhisperError};
+use crate::gui;
 use crate::input::{AudioBuffer, AudioRecorder, AudioRecorderError, HotkeyEvent, HotkeyListener};
 use crate::output::{OutputError, OutputHandler};
 use crate::platform::{CurrentPlatform, Platform};
+use crate::tray::{TrayEvent, TrayManager};
 use std::path::PathBuf;
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
@@ -125,13 +127,30 @@ impl Daemon {
     }
 
     /// Main daemon loop
-    pub async fn run_loop(&mut self) -> Result<(), DaemonError> {
+    pub async fn run_loop(&mut self, enable_tray: bool) -> Result<(), DaemonError> {
         info!(
             "OpenHush daemon started (display: {})",
             self.platform.display_server()
         );
         info!("Hotkey: {}", self.config.hotkey.key);
         info!("Model: {}", self.config.transcription.model);
+
+        // Initialize system tray if enabled
+        let tray: Option<TrayManager> = if enable_tray {
+            match TrayManager::new() {
+                Ok(t) => {
+                    info!("System tray initialized");
+                    Some(t)
+                }
+                Err(e) => {
+                    warn!("System tray unavailable: {}. Continuing without tray.", e);
+                    None
+                }
+            }
+        } else {
+            info!("System tray disabled");
+            None
+        };
 
         // Check if model exists
         let model_path = self.model_path()?;
@@ -184,6 +203,25 @@ impl Daemon {
 
         // Main event loop
         loop {
+            // Check for tray events (non-blocking)
+            if let Some(ref tray) = tray {
+                if let Some(tray_event) = tray.try_recv() {
+                    match tray_event {
+                        TrayEvent::ShowPreferences => {
+                            info!("Opening preferences from tray");
+                            gui::spawn_preferences();
+                        }
+                        TrayEvent::Quit => {
+                            info!("Quit requested from tray");
+                            break;
+                        }
+                        TrayEvent::StatusClicked => {
+                            debug!("Status clicked");
+                        }
+                    }
+                }
+            }
+
             tokio::select! {
                 // Handle hotkey events
                 Some(event) = hotkey_rx.recv() => {
@@ -245,6 +283,9 @@ impl Daemon {
                     info!("Shutdown signal received");
                     break;
                 }
+
+                // Small sleep to prevent busy loop when checking tray
+                _ = tokio::time::sleep(tokio::time::Duration::from_millis(10)) => {}
             }
         }
 
@@ -305,7 +346,7 @@ fn remove_pid() -> Result<(), DaemonError> {
 }
 
 /// Start the daemon
-pub async fn run(foreground: bool) -> Result<(), DaemonError> {
+pub async fn run(foreground: bool, enable_tray: bool) -> Result<(), DaemonError> {
     if is_running() {
         return Err(DaemonError::AlreadyRunning);
     }
@@ -319,7 +360,7 @@ pub async fn run(foreground: bool) -> Result<(), DaemonError> {
     write_pid()?;
 
     let mut daemon = Daemon::new(config)?;
-    let result = daemon.run_loop().await;
+    let result = daemon.run_loop(enable_tray).await;
 
     remove_pid()?;
 

@@ -65,6 +65,17 @@ notify-rust = "4"
 # Audio feedback
 rodio = "0.19"
 
+# System tray
+tray-icon = "0.19"
+image = "0.25"
+
+# GUI (preferences window)
+eframe = "0.29"
+egui = "0.29"
+
+# Open files/URLs
+open = "5"
+
 [target.'cfg(target_os = "linux")'.dependencies]
 # Linux TTY input
 evdev = "0.12"

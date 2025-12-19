@@ -5,9 +5,11 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilte
 mod config;
 mod daemon;
 mod engine;
+mod gui;
 mod input;
 mod output;
 mod platform;
+mod tray;
 
 #[derive(Parser)]
 #[command(name = "openhush")]
@@ -28,7 +30,14 @@ enum Commands {
         /// Run in foreground instead of daemonizing
         #[arg(short, long)]
         foreground: bool,
+
+        /// Disable system tray icon
+        #[arg(long)]
+        no_tray: bool,
     },
+
+    /// Open preferences GUI
+    Preferences,
 
     /// Stop the running daemon
     Stop,
@@ -117,9 +126,17 @@ async fn main() -> anyhow::Result<()> {
     init_logging(cli.verbose);
 
     match cli.command {
-        Commands::Start { foreground } => {
+        Commands::Start {
+            foreground,
+            no_tray,
+        } => {
             info!("Starting OpenHush daemon...");
-            daemon::run(foreground).await?;
+            daemon::run(foreground, !no_tray).await?;
+        }
+
+        Commands::Preferences => {
+            info!("Opening preferences...");
+            gui::run_preferences()?;
         }
 
         Commands::Stop => {
