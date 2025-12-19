@@ -381,7 +381,11 @@ impl AudioRecorder {
 
         // Clear previous samples
         {
-            let mut samples = self.samples.lock().unwrap();
+            // Use unwrap_or_else to handle poisoned mutex (shouldn't happen, but be safe)
+            let mut samples = self.samples.lock().unwrap_or_else(|poisoned| {
+                warn!("Samples mutex was poisoned, recovering");
+                poisoned.into_inner()
+            });
             samples.clear();
         }
 
@@ -399,8 +403,10 @@ impl AudioRecorder {
                 &self.config,
                 move |data: &[f32], _: &cpal::InputCallbackInfo| {
                     if recording.load(Ordering::SeqCst) {
-                        let mut samples_guard = samples.lock().unwrap();
-                        samples_guard.extend_from_slice(data);
+                        // Use if let to silently skip on poisoned mutex (audio callback can't panic)
+                        if let Ok(mut samples_guard) = samples.lock() {
+                            samples_guard.extend_from_slice(data);
+                        }
                     }
                 },
                 err_fn,
@@ -432,7 +438,10 @@ impl AudioRecorder {
 
         // Get the recorded samples
         let samples = {
-            let samples_guard = self.samples.lock().unwrap();
+            let samples_guard = self.samples.lock().unwrap_or_else(|poisoned| {
+                warn!("Samples mutex was poisoned, recovering");
+                poisoned.into_inner()
+            });
             samples_guard.clone()
         };
 

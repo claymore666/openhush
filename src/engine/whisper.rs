@@ -22,9 +22,6 @@ pub enum WhisperError {
     #[error("Transcription failed: {0}")]
     TranscriptionFailed(String),
 
-    #[error("Invalid audio: {0}")]
-    InvalidAudio(String),
-
     #[error("Audio validation failed: {0}")]
     ValidationFailed(#[from] AudioValidationError),
 }

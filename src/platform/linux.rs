@@ -58,8 +58,23 @@ impl LinuxPlatform {
 }
 
 impl Default for LinuxPlatform {
+    /// Creates a LinuxPlatform with default settings.
+    ///
+    /// # Panics
+    /// This implementation cannot currently panic as `LinuxPlatform::new()` only
+    /// performs infallible operations. However, prefer using `LinuxPlatform::new()`
+    /// directly for explicit error handling.
     fn default() -> Self {
-        Self::new().expect("Failed to create LinuxPlatform")
+        // LinuxPlatform::new() currently cannot fail, but we handle the Result
+        // for forward compatibility if initialization becomes fallible.
+        Self::new().unwrap_or_else(|e| {
+            // Log the error and create a minimal fallback
+            eprintln!("Warning: LinuxPlatform initialization failed: {}. Using fallback.", e);
+            Self {
+                display_server: super::DisplayServer::Tty,
+                clipboard: std::sync::Mutex::new(None),
+            }
+        })
     }
 }
 
@@ -82,7 +97,10 @@ impl HotkeyHandler for LinuxPlatform {
 
 impl TextOutput for LinuxPlatform {
     fn copy_to_clipboard(&self, text: &str) -> Result<(), PlatformError> {
-        let mut guard = self.clipboard.lock().unwrap();
+        let mut guard = self
+            .clipboard
+            .lock()
+            .map_err(|_| PlatformError::Clipboard("Clipboard mutex poisoned".into()))?;
 
         if let Some(ref mut clipboard) = *guard {
             clipboard

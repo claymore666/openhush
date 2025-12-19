@@ -220,7 +220,7 @@ impl Daemon {
 
         // Spawn transcription worker in dedicated thread
         let audio_config = self.config.audio.clone();
-        let _worker_handle = spawn_worker(engine, job_rx, result_tx, audio_config);
+        let _worker_handle = spawn_worker(engine, job_rx, result_tx, audio_config)?;
         info!("Transcription worker started");
 
         // Result tracker for ordered output
@@ -516,6 +516,8 @@ fn is_running() -> bool {
                 if let Ok(pid) = pid_str.trim().parse::<i32>() {
                     #[cfg(unix)]
                     {
+                        // SAFETY: kill(pid, 0) is safe - it only checks if process exists,
+                        // doesn't send any signal. The pid is validated as i32 from the PID file.
                         let result = unsafe { libc::kill(pid, 0) };
                         return result == 0;
                     }
@@ -582,6 +584,9 @@ pub async fn stop() -> Result<(), DaemonError> {
         if let Ok(pid) = pid_str.trim().parse::<i32>() {
             #[cfg(unix)]
             {
+                // SAFETY: kill(pid, SIGTERM) sends a termination signal to the process.
+                // The pid is validated as i32 from our own PID file. Sending to a non-existent
+                // or different process is harmless (returns error which we ignore).
                 unsafe {
                     libc::kill(pid, libc::SIGTERM);
                 }

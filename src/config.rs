@@ -524,9 +524,8 @@ pub fn update(
         } else {
             config.correction.enabled = true;
             // Parse "ollama:model_name" format
-            if llm_config.starts_with("ollama:") {
-                config.correction.ollama_model =
-                    llm_config.strip_prefix("ollama:").unwrap().to_string();
+            if let Some(model_name) = llm_config.strip_prefix("ollama:") {
+                config.correction.ollama_model = model_name.to_string();
             }
         }
         changed = true;
