@@ -9,6 +9,9 @@ Press a hotkey, speak, release — your words appear where your cursor is. Power
 - **Push-to-talk** — Hold key to record, release to transcribe
 - **Local processing** — All AI runs on your machine (GPU or CPU)
 - **Auto-paste** — Text appears where your cursor is
+- **Translation mode** — Speak in any language, get English text
+- **Audio preprocessing** — RMS normalization, compression, and limiting for cleaner audio
+- **System tray** — Background daemon with tray icon and preferences GUI
 - **LLM correction** — Optional grammar/punctuation fix via Ollama
 - **Cross-platform** — Linux, macOS, Windows
 - **Wayland native** — Full KDE Plasma / GNOME support
@@ -22,12 +25,14 @@ Press a hotkey, speak, release — your words appear where your cursor is. Power
 cargo install openhush
 
 # Download model (first time)
-openhush model download large-v3
+openhush model download small
 
 # Start daemon
 openhush start
 
 # Default hotkey: Right Ctrl (hold to record)
+# Open preferences GUI
+openhush preferences
 ```
 
 ## Requirements
@@ -47,9 +52,23 @@ key = "ControlRight"
 mode = "push_to_talk"  # or "toggle"
 
 [transcription]
-model = "large-v3"     # tiny, base, small, medium, large-v3
+model = "small"        # tiny, base, small, medium, large-v3
 language = "auto"      # or "en", "de", etc.
 device = "cuda"        # or "cpu"
+translate = false      # true = translate to English
+
+[audio]
+preprocessing = false  # enable audio preprocessing
+[audio.normalization]
+enabled = true
+target_db = -18.0
+[audio.compression]
+enabled = true
+threshold_db = -20.0
+ratio = 4.0
+[audio.limiter]
+enabled = true
+threshold_db = -3.0
 
 [output]
 clipboard = true
