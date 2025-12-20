@@ -8,6 +8,7 @@
 //! 5. Outputs text to clipboard and/or pastes at cursor (in order)
 
 use crate::config::Config;
+use crate::correction::TextCorrector;
 use crate::engine::{WhisperEngine, WhisperError};
 #[cfg(target_os = "linux")]
 use crate::gui;
@@ -332,6 +333,32 @@ impl Daemon {
             timer
         });
 
+        // Initialize text corrector if enabled
+        let text_corrector: Option<Arc<TextCorrector>> = if self.config.correction.enabled {
+            let corrector = Arc::new(TextCorrector::new(self.config.correction.clone()));
+            // Check if Ollama is available
+            if corrector.is_available().await {
+                info!(
+                    "LLM correction enabled (model: {}, filler removal: {:?})",
+                    self.config.correction.ollama_model,
+                    if self.config.correction.remove_fillers {
+                        Some(self.config.correction.filler_mode)
+                    } else {
+                        None
+                    }
+                );
+                Some(corrector)
+            } else {
+                warn!(
+                    "Ollama not available at {}. Continuing without LLM correction.",
+                    self.config.correction.ollama_url
+                );
+                None
+            }
+        } else {
+            None
+        };
+
         // Create transcription job and result channels
         let (job_tx, job_rx) = mpsc::channel(CHANNEL_BUFFER_SIZE);
         let (result_tx, mut result_rx) = mpsc::channel(CHANNEL_BUFFER_SIZE);
@@ -607,6 +634,14 @@ impl Daemon {
                                             text = vocab.apply(&text).await;
                                         }
 
+                                        // Apply LLM correction (includes filler removal)
+                                        if let Some(ref corrector) = text_corrector {
+                                            match corrector.correct(&text).await {
+                                                Ok(corrected) => text = corrected,
+                                                Err(e) => warn!("LLM correction failed: {}", e),
+                                            }
+                                        }
+
                                         info!(
                                             "📝 Output (seq {}.{}, {} chars)",
                                             ready.sequence_id,
@@ -650,6 +685,14 @@ impl Daemon {
                                 // Apply vocabulary replacements
                                 if let Some(ref vocab) = vocabulary_manager {
                                     text = vocab.apply(&text).await;
+                                }
+
+                                // Apply LLM correction (includes filler removal)
+                                if let Some(ref corrector) = text_corrector {
+                                    match corrector.correct(&text).await {
+                                        Ok(corrected) => text = corrected,
+                                        Err(e) => warn!("LLM correction failed: {}", e),
+                                    }
                                 }
 
                                 info!(

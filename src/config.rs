@@ -142,6 +142,35 @@ pub struct CorrectionConfig {
     /// Ollama model for correction
     #[serde(default = "default_ollama_model")]
     pub ollama_model: String,
+
+    /// Enable filler word removal (um, uh, like, etc.)
+    #[serde(default)]
+    pub remove_fillers: bool,
+
+    /// Filler removal mode: conservative, moderate, or aggressive
+    #[serde(default)]
+    pub filler_mode: FillerRemovalMode,
+
+    /// Timeout for Ollama requests in seconds
+    #[serde(default = "default_ollama_timeout")]
+    pub timeout_secs: u32,
+}
+
+/// Filler word removal mode
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum FillerRemovalMode {
+    /// Only remove basic fillers: um, uh, er
+    #[default]
+    Conservative,
+    /// Remove common fillers with context awareness: um, uh, er, like, you know, basically
+    Moderate,
+    /// Remove all fillers aggressively: so, well, I mean, right, actually, etc.
+    Aggressive,
+}
+
+fn default_ollama_timeout() -> u32 {
+    30 // seconds
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -480,6 +509,9 @@ impl Default for CorrectionConfig {
             enabled: false,
             ollama_url: default_ollama_url(),
             ollama_model: default_ollama_model(),
+            remove_fillers: false,
+            filler_mode: FillerRemovalMode::default(),
+            timeout_secs: default_ollama_timeout(),
         }
     }
 }
