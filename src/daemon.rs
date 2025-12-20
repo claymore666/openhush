@@ -985,10 +985,10 @@ fn is_running() -> bool {
                 if let Ok(pid) = pid_str.trim().parse::<i32>() {
                     #[cfg(unix)]
                     {
-                        // SAFETY: kill(pid, 0) is safe - it only checks if process exists,
-                        // doesn't send any signal. The pid is validated as i32 from the PID file.
-                        let result = unsafe { libc::kill(pid, 0) };
-                        return result == 0;
+                        use nix::sys::signal::kill;
+                        use nix::unistd::Pid;
+                        // kill with signal None (0) only checks if process exists
+                        return kill(Pid::from_raw(pid), None).is_ok();
                     }
                     #[cfg(not(unix))]
                     {
@@ -1139,9 +1139,10 @@ fn check_and_cleanup_stale_pid() -> Result<(), DaemonError> {
     // Check if process is actually running
     #[cfg(unix)]
     {
-        // SAFETY: kill(pid, 0) is safe - only checks if process exists
-        let result = unsafe { libc::kill(pid, 0) };
-        if result != 0 {
+        use nix::sys::signal::kill;
+        use nix::unistd::Pid;
+        // kill with signal None (0) only checks if process exists
+        if kill(Pid::from_raw(pid), None).is_err() {
             // Process not running, this is a stale PID file
             warn!(
                 "Removing stale PID file (process {} no longer running)",
@@ -1192,6 +1193,9 @@ pub async fn stop() -> Result<(), DaemonError> {
 
             #[cfg(unix)]
             {
+                use nix::sys::signal::{kill, Signal};
+                use nix::unistd::Pid;
+
                 // Verify the process is actually openhush before sending signal
                 if !verify_openhush_process(pid) {
                     warn!(
@@ -1202,12 +1206,12 @@ pub async fn stop() -> Result<(), DaemonError> {
                     return Err(DaemonError::NotRunning);
                 }
 
-                // SAFETY: kill(pid, SIGTERM) sends a termination signal to the process.
-                // The pid is validated as i32 and verified to be an openhush process.
-                unsafe {
-                    libc::kill(pid, libc::SIGTERM);
+                // Send SIGTERM to gracefully stop the daemon
+                if let Err(e) = kill(Pid::from_raw(pid), Signal::SIGTERM) {
+                    warn!("Failed to send SIGTERM to daemon: {}", e);
+                } else {
+                    info!("Sent SIGTERM to daemon (PID: {})", pid);
                 }
-                info!("Sent SIGTERM to daemon (PID: {})", pid);
             }
             #[cfg(not(unix))]
             {
