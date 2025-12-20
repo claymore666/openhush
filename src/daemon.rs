@@ -17,6 +17,7 @@ use crate::platform::{CurrentPlatform, Platform};
 use crate::queue::{worker::spawn_worker, TranscriptionJob, TranscriptionTracker};
 #[cfg(target_os = "linux")]
 use crate::tray::{TrayEvent, TrayManager};
+use crate::vad::{silero::SileroVad, VadEngine, VadError, VadState};
 use std::path::PathBuf;
 use thiserror::Error;
 use tokio::sync::mpsc;
@@ -58,6 +59,9 @@ pub enum DaemonError {
     #[error("Daemon not running")]
     NotRunning,
 
+    #[error("VAD error: {0}")]
+    Vad(#[from] VadError),
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
@@ -80,6 +84,17 @@ enum DaemonState {
         mark: AudioMark,
         /// Position of last emitted chunk (or mark.position initially)
         last_chunk_pos: usize,
+        /// Next chunk ID (0, 1, 2, ...)
+        next_chunk_id: u32,
+    },
+    /// Continuous recording with VAD-based segmentation
+    ContinuousRecording {
+        /// Original mark for sequence_id
+        mark: AudioMark,
+        /// Position of last VAD-detected speech start
+        speech_start_pos: Option<usize>,
+        /// Position of last processed audio
+        last_vad_pos: usize,
         /// Next chunk ID (0, 1, 2, ...)
         next_chunk_id: u32,
     },
@@ -201,6 +216,13 @@ impl Daemon {
             configured_interval
         };
 
+        if self.config.audio.noise_reduction.enabled {
+            info!(
+                "RNNoise noise reduction enabled (strength: {:.2})",
+                self.config.audio.noise_reduction.strength
+            );
+        }
+
         if self.config.audio.preprocessing {
             info!(
                 "Audio preprocessing enabled (normalize={}, compress={}, limit={})",
@@ -215,11 +237,44 @@ impl Daemon {
 
         // Initialize always-on audio recorder with ring buffer
         let prebuffer_secs = self.config.audio.prebuffer_duration_secs;
-        let audio_recorder = AudioRecorder::new_always_on(prebuffer_secs)?;
+        let resampling_quality = self.config.audio.resampling_quality;
+        let audio_recorder = AudioRecorder::new_always_on(prebuffer_secs, resampling_quality)?;
         info!(
-            "Always-on audio capture initialized ({:.0}s ring buffer)",
-            prebuffer_secs
+            "Always-on audio capture initialized ({:.0}s ring buffer, {:?} resampling)",
+            prebuffer_secs, resampling_quality
         );
+
+        // Initialize VAD if enabled (for continuous dictation mode)
+        let vad_config = self.config.vad.clone();
+        let is_continuous_mode = self.config.hotkey.mode == "continuous";
+        let mut vad_engine: Option<Box<dyn VadEngine>> = if vad_config.enabled || is_continuous_mode {
+            match SileroVad::new(&vad_config) {
+                Ok(vad) => {
+                    info!(
+                        "Silero VAD initialized (threshold: {:.2}, min_silence: {}ms, min_speech: {}ms)",
+                        vad_config.threshold,
+                        vad_config.min_silence_ms,
+                        vad_config.min_speech_ms
+                    );
+                    Some(Box::new(vad))
+                }
+                Err(e) => {
+                    if is_continuous_mode {
+                        return Err(DaemonError::Vad(e));
+                    } else {
+                        warn!("VAD initialization failed: {}. Continuing without VAD.", e);
+                        None
+                    }
+                }
+            }
+        } else {
+            None
+        };
+        let mut vad_state: Option<VadState> = if vad_engine.is_some() {
+            Some(VadState::new(vad_config.clone(), 16000))
+        } else {
+            None
+        };
 
         // Create transcription job and result channels
         let (job_tx, job_rx) = mpsc::channel(CHANNEL_BUFFER_SIZE);
@@ -264,10 +319,21 @@ impl Daemon {
         // Chunk timer (resets on each recording start)
         let mut chunk_timer: Option<tokio::time::Interval> = None;
 
-        info!(
-            "Daemon running. Hold {} to record, release to transcribe.",
-            self.config.hotkey.key
-        );
+        // VAD processing interval (32ms = 512 samples at 16kHz, matches Silero VAD chunk size)
+        const VAD_PROCESS_INTERVAL_MS: u64 = 32;
+        let mut vad_timer: Option<tokio::time::Interval> = None;
+
+        if is_continuous_mode {
+            info!(
+                "Daemon running in CONTINUOUS mode. Press {} to start/stop VAD-based dictation.",
+                self.config.hotkey.key
+            );
+        } else {
+            info!(
+                "Daemon running. Hold {} to record, release to transcribe.",
+                self.config.hotkey.key
+            );
+        }
 
         // Set up Unix signal handlers (SIGTERM, SIGHUP)
         #[cfg(unix)]
@@ -339,8 +405,47 @@ impl Daemon {
                 Some(event) = hotkey_rx.recv() => {
                     match event {
                         HotkeyEvent::Pressed => {
-                            if matches!(self.state, DaemonState::Idle) {
-                                // Mark the current position in the ring buffer (instant!)
+                            if is_continuous_mode {
+                                // Continuous mode: toggle recording on/off
+                                match &self.state {
+                                    DaemonState::Idle => {
+                                        let mark = audio_recorder.mark();
+                                        let start_pos = audio_recorder.current_position();
+                                        info!("🎙️ Continuous recording started (sequence_id: {})", mark.sequence_id);
+
+                                        // Start VAD timer for continuous processing
+                                        let mut timer = tokio::time::interval(
+                                            tokio::time::Duration::from_millis(VAD_PROCESS_INTERVAL_MS)
+                                        );
+                                        timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                                        vad_timer = Some(timer);
+
+                                        // Reset VAD state for new recording
+                                        if let Some(ref mut state) = vad_state {
+                                            state.reset();
+                                        }
+                                        if let Some(ref mut engine) = vad_engine {
+                                            engine.reset();
+                                        }
+                                        tracker.reset_dedup();
+
+                                        self.state = DaemonState::ContinuousRecording {
+                                            mark,
+                                            speech_start_pos: None,
+                                            last_vad_pos: start_pos,
+                                            next_chunk_id: 0,
+                                        };
+                                    }
+                                    DaemonState::ContinuousRecording { .. } => {
+                                        // Toggle off - stop continuous recording
+                                        info!("🛑 Continuous recording stopped");
+                                        vad_timer = None;
+                                        self.state = DaemonState::Idle;
+                                    }
+                                    _ => {}
+                                }
+                            } else if matches!(self.state, DaemonState::Idle) {
+                                // Push-to-talk mode: start recording on press
                                 let mark = audio_recorder.mark();
                                 let start_pos = audio_recorder.current_position();
                                 debug!(
@@ -352,7 +457,6 @@ impl Daemon {
                                 if let Some(interval) = chunk_interval {
                                     let mut timer = tokio::time::interval(interval);
                                     timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-                                    // Skip the first tick (fires immediately)
                                     chunk_timer = Some(timer);
                                 }
 
@@ -367,6 +471,10 @@ impl Daemon {
                             }
                         }
                         HotkeyEvent::Released => {
+                            // Continuous mode ignores release events (toggle behavior)
+                            if is_continuous_mode {
+                                continue;
+                            }
                             if let DaemonState::Recording { mark, last_chunk_pos, next_chunk_id } = std::mem::replace(
                                 &mut self.state,
                                 DaemonState::Idle,
@@ -564,6 +672,97 @@ impl Daemon {
                         } else {
                             debug!("Chunk too short, skipping");
                         }
+                    }
+                }
+
+                // Handle VAD timer tick (continuous dictation mode)
+                _ = async {
+                    if let Some(timer) = &mut vad_timer {
+                        timer.tick().await;
+                    } else {
+                        std::future::pending::<()>().await;
+                    }
+                } => {
+                    if let DaemonState::ContinuousRecording {
+                        ref mark,
+                        ref mut speech_start_pos,
+                        ref mut last_vad_pos,
+                        ref mut next_chunk_id,
+                    } = self.state {
+                        let current_pos = audio_recorder.current_position();
+
+                        // Extract audio from last VAD position to current for VAD processing
+                        if let Some(buffer) = audio_recorder.extract_chunk(*last_vad_pos, current_pos) {
+                            let samples = &buffer.samples;
+
+                            // Process through VAD
+                            if let (Some(ref mut engine), Some(ref mut state)) = (&mut vad_engine, &mut vad_state) {
+                                match engine.process(samples) {
+                                    Ok(result) => {
+                                        // Track speech start position
+                                        if result.is_speech && speech_start_pos.is_none() {
+                                            *speech_start_pos = Some(*last_vad_pos);
+                                            debug!("VAD: Speech started at pos {} (prob: {:.2})", *last_vad_pos, result.probability);
+                                        }
+
+                                        // Update state and check for speech segment completion
+                                        if let Some(segment) = state.update(&result, samples.len()) {
+                                            // Speech segment detected - extract and transcribe
+                                            let segment_start = speech_start_pos.take().unwrap_or(segment.start);
+                                            let segment_end = current_pos;
+
+                                            if let Some(segment_buffer) = audio_recorder.extract_chunk(segment_start, segment_end) {
+                                                info!(
+                                                    "🎤 VAD speech segment {:.2}s (seq {}.{}, prob: {:.2})",
+                                                    segment_buffer.duration_secs(),
+                                                    mark.sequence_id,
+                                                    *next_chunk_id,
+                                                    segment.avg_probability
+                                                );
+
+                                                // Track pending transcription with backpressure
+                                                let accepted = tracker.add_pending_with_config(
+                                                    mark.sequence_id,
+                                                    *next_chunk_id,
+                                                    max_pending,
+                                                    high_water_mark,
+                                                    backpressure_strategy,
+                                                );
+                                                if !accepted {
+                                                    warn!(
+                                                        "VAD segment rejected due to backpressure (seq {}.{})",
+                                                        mark.sequence_id, *next_chunk_id
+                                                    );
+                                                    #[cfg(unix)]
+                                                    if notify_on_backpressure {
+                                                        let _ = notify_rust::Notification::new()
+                                                            .summary("OpenHush")
+                                                            .body("Transcription queue full - audio dropped")
+                                                            .show();
+                                                    }
+                                                } else {
+                                                    // Submit transcription job
+                                                    let job = TranscriptionJob {
+                                                        buffer: segment_buffer,
+                                                        sequence_id: mark.sequence_id,
+                                                        chunk_id: *next_chunk_id,
+                                                        is_final: false, // Continuous mode, more may come
+                                                    };
+                                                    if job_tx.send(job).await.is_err() {
+                                                        error!("Failed to submit VAD transcription job");
+                                                    }
+                                                }
+                                                *next_chunk_id += 1;
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        warn!("VAD processing error: {}", e);
+                                    }
+                                }
+                            }
+                        }
+                        *last_vad_pos = current_pos;
                     }
                 }
 

@@ -116,8 +116,15 @@ impl TranscriptionWorker {
         info!("Transcription worker stopped");
     }
 
-    /// Apply audio preprocessing (normalization, compression, limiter).
+    /// Apply audio preprocessing (noise reduction, normalization, compression, limiter).
     fn preprocess_audio(buffer: &mut AudioBuffer, config: &AudioConfig) {
+        // Noise reduction is independent of the preprocessing flag
+        // as it's a separate feature that can be enabled standalone
+        if config.noise_reduction.enabled {
+            debug!("Applying RNNoise noise reduction (strength: {:.2})", config.noise_reduction.strength);
+            buffer.denoise(config.noise_reduction.strength);
+        }
+
         if !config.preprocessing {
             return;
         }

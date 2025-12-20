@@ -15,6 +15,7 @@ mod platform;
 mod queue;
 #[cfg(target_os = "linux")]
 mod tray;
+mod vad;
 
 #[derive(Parser)]
 #[command(name = "openhush")]

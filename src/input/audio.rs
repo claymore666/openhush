@@ -8,12 +8,15 @@
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, SampleRate, Stream, StreamConfig};
+use nnnoiseless::DenoiseState;
+use rubato::{Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
 
 use super::ring_buffer::{AudioMark, AudioRingBuffer};
+use crate::config::ResamplingQuality;
 
 /// Target sample rate for Whisper (16kHz)
 pub const SAMPLE_RATE: u32 = 16000;
@@ -242,6 +245,108 @@ impl AudioBuffer {
             );
         }
     }
+
+    /// Apply RNNoise neural network noise reduction
+    ///
+    /// RNNoise is designed for real-time speech enhancement, removing
+    /// background noise, keyboard clicks, fan noise, and other non-speech sounds.
+    ///
+    /// - `strength`: Mix between original (0.0) and denoised (1.0) audio
+    ///
+    /// Note: This internally resamples to 48kHz (RNNoise native rate) and back.
+    pub fn denoise(&mut self, strength: f32) {
+        if self.samples.is_empty() || strength <= 0.0 {
+            return;
+        }
+
+        let strength = strength.clamp(0.0, 1.0);
+
+        // RNNoise constants
+        const RNNOISE_SAMPLE_RATE: u32 = 48000;
+        const RNNOISE_FRAME_SIZE: usize = 480; // 10ms at 48kHz
+
+        // Keep original for mixing
+        let original_samples = if strength < 1.0 {
+            Some(self.samples.clone())
+        } else {
+            None
+        };
+
+        // Resample 16kHz -> 48kHz for RNNoise
+        let upsampled = if self.sample_rate != RNNOISE_SAMPLE_RATE {
+            resample_for_rnnoise(&self.samples, self.sample_rate, RNNOISE_SAMPLE_RATE)
+        } else {
+            self.samples.clone()
+        };
+
+        // Process through RNNoise
+        let mut denoiser = DenoiseState::new();
+        let mut denoised = Vec::with_capacity(upsampled.len());
+
+        // Scale from [-1.0, 1.0] to [-32768.0, 32767.0] for RNNoise
+        let scaled: Vec<f32> = upsampled.iter().map(|&s| s * 32767.0).collect();
+
+        // Process in 480-sample frames
+        let mut frame_input = [0.0f32; RNNOISE_FRAME_SIZE];
+        let mut frame_output = [0.0f32; RNNOISE_FRAME_SIZE];
+
+        for (i, chunk) in scaled.chunks(RNNOISE_FRAME_SIZE).enumerate() {
+            // Copy to frame buffer (pad with zeros if last chunk is short)
+            frame_input[..chunk.len()].copy_from_slice(chunk);
+            if chunk.len() < RNNOISE_FRAME_SIZE {
+                frame_input[chunk.len()..].fill(0.0);
+            }
+
+            // Process frame
+            let _vad_prob = denoiser.process_frame(&mut frame_output, &frame_input);
+
+            // Skip first frame (contains fade-in artifacts) but still include
+            // its output for correct alignment, just attenuate it
+            if i == 0 {
+                // Fade in the first frame to reduce artifacts
+                for (j, sample) in frame_output.iter().enumerate() {
+                    let fade = j as f32 / RNNOISE_FRAME_SIZE as f32;
+                    denoised.push(sample * fade / 32767.0);
+                }
+            } else if chunk.len() < RNNOISE_FRAME_SIZE {
+                // Last partial frame - only take what we need
+                for &sample in &frame_output[..chunk.len()] {
+                    denoised.push(sample / 32767.0);
+                }
+            } else {
+                // Normal frame - scale back to [-1.0, 1.0]
+                for &sample in &frame_output {
+                    denoised.push(sample / 32767.0);
+                }
+            }
+        }
+
+        // Resample 48kHz -> 16kHz back to original rate
+        let downsampled = if self.sample_rate != RNNOISE_SAMPLE_RATE {
+            resample_for_rnnoise(&denoised, RNNOISE_SAMPLE_RATE, self.sample_rate)
+        } else {
+            denoised
+        };
+
+        // Ensure same length as original (resampling may cause slight differences)
+        let original_len = self.samples.len();
+        self.samples = if downsampled.len() >= original_len {
+            downsampled[..original_len].to_vec()
+        } else {
+            let mut result = downsampled;
+            result.resize(original_len, 0.0);
+            result
+        };
+
+        // Mix with original if strength < 1.0
+        if let Some(orig) = original_samples {
+            for (i, sample) in self.samples.iter_mut().enumerate() {
+                *sample = orig[i] * (1.0 - strength) + *sample * strength;
+            }
+        }
+
+        debug!("Applied RNNoise denoising (strength: {:.2})", strength);
+    }
 }
 
 /// Audio recorder for capturing microphone input
@@ -264,6 +369,8 @@ pub struct AudioRecorder {
     ring_buffer: Option<Arc<AudioRingBuffer>>,
     /// Always-on mode: whether stream is always running
     always_on: bool,
+    /// Resampling quality setting
+    resampling_quality: ResamplingQuality,
 }
 
 impl AudioRecorder {
@@ -272,7 +379,7 @@ impl AudioRecorder {
     /// In legacy mode, call `start()` to begin recording and `stop()` to end.
     #[allow(dead_code)]
     pub fn new() -> Result<Self, AudioRecorderError> {
-        Self::new_internal(None)
+        Self::new_internal(None, ResamplingQuality::default())
     }
 
     /// Create a new always-on audio recorder
@@ -283,12 +390,19 @@ impl AudioRecorder {
     ///
     /// # Arguments
     /// * `prebuffer_secs` - Duration of audio to buffer (default: 30.0 seconds)
-    pub fn new_always_on(prebuffer_secs: f32) -> Result<Self, AudioRecorderError> {
-        Self::new_internal(Some(prebuffer_secs))
+    /// * `resampling_quality` - Quality of audio resampling (low=linear, high=sinc)
+    pub fn new_always_on(
+        prebuffer_secs: f32,
+        resampling_quality: ResamplingQuality,
+    ) -> Result<Self, AudioRecorderError> {
+        Self::new_internal(Some(prebuffer_secs), resampling_quality)
     }
 
     /// Internal constructor
-    fn new_internal(prebuffer_secs: Option<f32>) -> Result<Self, AudioRecorderError> {
+    fn new_internal(
+        prebuffer_secs: Option<f32>,
+        resampling_quality: ResamplingQuality,
+    ) -> Result<Self, AudioRecorderError> {
         let host = cpal::default_host();
 
         let device = host
@@ -331,6 +445,7 @@ impl AudioRecorder {
             device_sample_rate,
             ring_buffer,
             always_on,
+            resampling_quality,
         };
 
         // In always-on mode, start the stream immediately
@@ -462,7 +577,12 @@ impl AudioRecorder {
 
         // Resample to 16kHz if needed
         let resampled = if self.device_sample_rate != SAMPLE_RATE {
-            resample(&samples, self.device_sample_rate, SAMPLE_RATE)
+            resample(
+                &samples,
+                self.device_sample_rate,
+                SAMPLE_RATE,
+                self.resampling_quality,
+            )
         } else {
             samples
         };
@@ -566,7 +686,12 @@ impl AudioRecorder {
 
         // Resample to 16kHz if needed
         let resampled = if self.device_sample_rate != SAMPLE_RATE {
-            resample(&samples, self.device_sample_rate, SAMPLE_RATE)
+            resample(
+                &samples,
+                self.device_sample_rate,
+                SAMPLE_RATE,
+                self.resampling_quality,
+            )
         } else {
             samples
         };
@@ -664,7 +789,12 @@ impl AudioRecorder {
 
         // Resample to 16kHz if needed
         let resampled = if self.device_sample_rate != SAMPLE_RATE {
-            resample(&samples, self.device_sample_rate, SAMPLE_RATE)
+            resample(
+                &samples,
+                self.device_sample_rate,
+                SAMPLE_RATE,
+                self.resampling_quality,
+            )
         } else {
             samples
         };
@@ -798,14 +928,28 @@ pub fn default_device_name() -> Option<String> {
     host.default_input_device().and_then(|d| d.name().ok())
 }
 
-/// Simple linear resampling
+/// Resample audio using the specified quality setting
 ///
-/// For better quality, consider using the `rubato` crate.
-fn resample(samples: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
+/// - `Low`: Fast linear interpolation (lower quality)
+/// - `High`: Sinc interpolation via rubato (higher quality, better for transcription)
+fn resample(
+    samples: &[f32],
+    from_rate: u32,
+    to_rate: u32,
+    quality: ResamplingQuality,
+) -> Vec<f32> {
     if from_rate == to_rate {
         return samples.to_vec();
     }
 
+    match quality {
+        ResamplingQuality::Low => resample_linear(samples, from_rate, to_rate),
+        ResamplingQuality::High => resample_sinc(samples, from_rate, to_rate),
+    }
+}
+
+/// Simple linear resampling (fast, lower quality)
+fn resample_linear(samples: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
     let ratio = to_rate as f64 / from_rate as f64;
     let new_len = (samples.len() as f64 * ratio) as usize;
     let mut result = Vec::with_capacity(new_len);
@@ -823,6 +967,107 @@ fn resample(samples: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
     }
 
     result
+}
+
+/// Fast linear resampling for RNNoise (16kHz <-> 48kHz)
+///
+/// Uses simple linear interpolation which is sufficient for
+/// internal RNNoise processing where we're doing 16kHz -> 48kHz -> 16kHz.
+fn resample_for_rnnoise(samples: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
+    if from_rate == to_rate {
+        return samples.to_vec();
+    }
+    resample_linear(samples, from_rate, to_rate)
+}
+
+/// High-quality sinc resampling via rubato
+///
+/// Uses polyphase sinc interpolation which is the standard for professional audio.
+/// This provides better frequency response and less aliasing than linear interpolation.
+fn resample_sinc(samples: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
+    if samples.is_empty() {
+        return Vec::new();
+    }
+
+    // Configure sinc resampler for high quality audio
+    let params = SincInterpolationParameters {
+        sinc_len: 256,
+        f_cutoff: 0.95,
+        interpolation: SincInterpolationType::Linear,
+        oversampling_factor: 256,
+        window: WindowFunction::BlackmanHarris2,
+    };
+
+    let resample_ratio = to_rate as f64 / from_rate as f64;
+
+    // Create resampler for mono audio (1 channel)
+    // chunk_size is how many input samples we process at once
+    let chunk_size = 1024;
+    let mut resampler = match SincFixedIn::<f32>::new(
+        resample_ratio,
+        2.0, // max relative ratio (allows some flexibility)
+        params,
+        chunk_size,
+        1, // mono
+    ) {
+        Ok(r) => r,
+        Err(e) => {
+            warn!("Failed to create sinc resampler: {}, falling back to linear", e);
+            return resample_linear(samples, from_rate, to_rate);
+        }
+    };
+
+    let mut output = Vec::with_capacity((samples.len() as f64 * resample_ratio) as usize + 1024);
+
+    // Process in chunks
+    let mut pos = 0;
+    while pos < samples.len() {
+        let end = (pos + chunk_size).min(samples.len());
+        let chunk = &samples[pos..end];
+
+        // Pad last chunk if needed
+        let input_chunk: Vec<f32> = if chunk.len() < chunk_size {
+            let mut padded = chunk.to_vec();
+            padded.resize(chunk_size, 0.0);
+            padded
+        } else {
+            chunk.to_vec()
+        };
+
+        // rubato expects Vec<Vec<f32>> for multi-channel, we have mono
+        let input_frames = vec![input_chunk];
+
+        match resampler.process(&input_frames, None) {
+            Ok(resampled) => {
+                if !resampled.is_empty() && !resampled[0].is_empty() {
+                    // For the last chunk, only take the proportional amount
+                    if chunk.len() < chunk_size {
+                        let expected_out = (chunk.len() as f64 * resample_ratio).ceil() as usize;
+                        let take = expected_out.min(resampled[0].len());
+                        output.extend_from_slice(&resampled[0][..take]);
+                    } else {
+                        output.extend_from_slice(&resampled[0]);
+                    }
+                }
+            }
+            Err(e) => {
+                warn!("Sinc resampling error: {}, falling back to linear", e);
+                return resample_linear(samples, from_rate, to_rate);
+            }
+        }
+
+        pos = end;
+    }
+
+    debug!(
+        "Sinc resampled {} -> {} samples ({}Hz -> {}Hz)",
+        samples.len(),
+        output.len(),
+        from_rate,
+        to_rate
+    );
+
+    output
 }
 
 /// Save audio buffer to a WAV file for debugging
@@ -896,15 +1141,25 @@ mod tests {
     #[test]
     fn test_resample_same_rate() {
         let samples = vec![1.0, 2.0, 3.0, 4.0];
-        let result = resample(&samples, 16000, 16000);
+        let result = resample(&samples, 16000, 16000, ResamplingQuality::Low);
         assert_eq!(result, samples);
     }
 
     #[test]
-    fn test_resample_downsample() {
+    fn test_resample_downsample_linear() {
         let samples: Vec<f32> = (0..100).map(|i| i as f32).collect();
-        let result = resample(&samples, 48000, 16000);
+        let result = resample(&samples, 48000, 16000, ResamplingQuality::Low);
         assert!(result.len() < samples.len());
+    }
+
+    #[test]
+    fn test_resample_downsample_sinc() {
+        let samples: Vec<f32> = (0..4800).map(|i| i as f32).collect();
+        let result = resample(&samples, 48000, 16000, ResamplingQuality::High);
+        assert!(result.len() < samples.len());
+        // Sinc resampling should produce roughly 1/3 the samples (48kHz -> 16kHz)
+        let expected_len = (samples.len() as f64 * 16000.0 / 48000.0) as usize;
+        assert!((result.len() as i32 - expected_len as i32).abs() < 100);
     }
 
     #[test]
@@ -1047,5 +1302,64 @@ mod tests {
         for (orig, processed) in original.iter().zip(buffer.samples.iter()) {
             assert!((orig - processed).abs() < 0.001);
         }
+    }
+
+    #[test]
+    fn test_denoise_processes_audio() {
+        // Create a 1 second buffer at 16kHz with some noise-like content
+        let samples: Vec<f32> = (0..16000)
+            .map(|i| {
+                // Mix of speech-like frequency (300Hz) and noise (random-ish)
+                let speech = (2.0 * std::f32::consts::PI * 300.0 * i as f32 / 16000.0).sin() * 0.5;
+                let noise = ((i * 7) % 100) as f32 / 100.0 - 0.5;
+                (speech + noise * 0.1).clamp(-1.0, 1.0)
+            })
+            .collect();
+
+        let mut buffer = AudioBuffer {
+            samples: samples.clone(),
+            sample_rate: 16000,
+        };
+
+        buffer.denoise(1.0);
+
+        // After denoising, buffer should still have same length
+        assert_eq!(buffer.samples.len(), samples.len());
+
+        // Samples should be within valid range
+        for sample in &buffer.samples {
+            assert!(
+                *sample >= -1.0 && *sample <= 1.0,
+                "Sample {} out of range",
+                sample
+            );
+        }
+    }
+
+    #[test]
+    fn test_denoise_strength_mixing() {
+        let samples: Vec<f32> = (0..16000).map(|i| (i as f32 / 16000.0) * 0.5).collect();
+        let mut buffer = AudioBuffer {
+            samples: samples.clone(),
+            sample_rate: 16000,
+        };
+
+        // With strength 0, audio should be unchanged
+        buffer.denoise(0.0);
+        for (orig, processed) in samples.iter().zip(buffer.samples.iter()) {
+            assert!((orig - processed).abs() < 0.001);
+        }
+    }
+
+    #[test]
+    fn test_denoise_empty_buffer() {
+        let mut buffer = AudioBuffer {
+            samples: vec![],
+            sample_rate: 16000,
+        };
+
+        // Should not panic on empty buffer
+        buffer.denoise(1.0);
+        assert!(buffer.samples.is_empty());
     }
 }

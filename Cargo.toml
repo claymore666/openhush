@@ -18,8 +18,17 @@ debug-audio = []
 # Transcription
 whisper-rs = "0.13"
 
+# Voice Activity Detection (Silero VAD with bundled ONNX)
+silero-vad-rust = { version = "6.2", default-features = false }
+
 # Audio capture
 cpal = "0.15"
+
+# High-quality audio resampling
+rubato = "0.16"
+
+# Neural network-based noise reduction (RNNoise)
+nnnoiseless = { version = "0.5", default-features = false }
 
 # Global hotkeys
 rdev = "0.5"

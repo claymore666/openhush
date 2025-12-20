@@ -1,3 +1,4 @@
+use crate::vad::VadConfig;
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -48,6 +49,10 @@ pub struct Config {
 
     #[serde(default)]
     pub gpu: GpuConfig,
+
+    /// Voice Activity Detection settings for continuous dictation
+    #[serde(default)]
+    pub vad: VadConfig,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -115,6 +120,17 @@ pub struct FeedbackConfig {
     /// Show desktop notification
     #[serde(default = "default_true")]
     pub visual: bool,
+}
+
+/// Audio resampling quality
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ResamplingQuality {
+    /// Linear interpolation - fast but lower quality
+    Low,
+    /// Sinc interpolation via rubato - high quality, recommended
+    #[default]
+    High,
 }
 
 /// Backpressure strategy when transcription queue is full
@@ -188,6 +204,11 @@ pub struct AudioConfig {
     #[serde(default = "default_prebuffer_duration")]
     pub prebuffer_duration_secs: f32,
 
+    /// Resampling quality: "low" (linear) or "high" (sinc via rubato)
+    /// High quality provides better transcription accuracy but uses more CPU.
+    #[serde(default)]
+    pub resampling_quality: ResamplingQuality,
+
     /// Enable/disable all preprocessing
     #[serde(default)]
     pub preprocessing: bool,
@@ -203,18 +224,49 @@ pub struct AudioConfig {
     /// Limiter settings
     #[serde(default)]
     pub limiter: LimiterConfig,
+
+    /// Noise reduction settings (RNNoise)
+    #[serde(default)]
+    pub noise_reduction: NoiseReductionConfig,
 }
 
 impl Default for AudioConfig {
     fn default() -> Self {
         Self {
             prebuffer_duration_secs: default_prebuffer_duration(),
+            resampling_quality: ResamplingQuality::default(),
             preprocessing: false,
             normalization: NormalizationConfig::default(),
             compression: CompressionConfig::default(),
             limiter: LimiterConfig::default(),
+            noise_reduction: NoiseReductionConfig::default(),
         }
     }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct NoiseReductionConfig {
+    /// Enable RNNoise neural network noise reduction
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Strength of noise reduction (0.0 to 1.0)
+    /// Higher values = more aggressive noise removal
+    #[serde(default = "default_noise_reduction_strength")]
+    pub strength: f32,
+}
+
+impl Default for NoiseReductionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false, // Opt-in feature
+            strength: default_noise_reduction_strength(),
+        }
+    }
+}
+
+fn default_noise_reduction_strength() -> f32 {
+    1.0 // Full strength by default when enabled
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -543,6 +595,20 @@ impl Config {
         if self.audio.limiter.ceiling_db > 0.0 {
             return Err(ConfigError::ValidationError(
                 "limiter ceiling_db must be negative (in dB)".into(),
+            ));
+        }
+
+        // Validate noise reduction settings
+        if self.audio.noise_reduction.strength < 0.0 || self.audio.noise_reduction.strength > 1.0 {
+            return Err(ConfigError::ValidationError(
+                "noise_reduction strength must be between 0.0 and 1.0".into(),
+            ));
+        }
+
+        // Validate VAD settings
+        if self.vad.threshold < 0.0 || self.vad.threshold > 1.0 {
+            return Err(ConfigError::ValidationError(
+                "vad threshold must be between 0.0 and 1.0".into(),
             ));
         }
 
