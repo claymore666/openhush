@@ -2,16 +2,18 @@
 //!
 //! Captures audio from the microphone at 16kHz mono for Whisper compatibility.
 //!
-//! Supports two modes:
-//! - **Legacy mode**: `start()`/`stop()` for backward compatibility
-//! - **Always-on mode**: `new_always_on()` + `mark()`/`extract()` for instant capture
+//! Uses always-on mode with a ring buffer for instant capture:
+//! - Audio stream runs continuously, filling a ring buffer
+//! - `mark()` records the current position when recording starts
+//! - `extract_chunk()` extracts audio between positions for transcription
+//!
+//! This design avoids startup delays and provides consistent low-latency capture.
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, SampleRate, Stream, StreamConfig};
 use nnnoiseless::DenoiseState;
 use rubato::{Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
 
@@ -45,22 +47,6 @@ pub enum AudioRecorderError {
 
     #[error("Recording too short (minimum {MIN_DURATION_SECS}s)")]
     TooShort,
-
-    #[allow(dead_code)]
-    #[error("Not currently recording")]
-    NotRecording,
-
-    #[allow(dead_code)]
-    #[error("Already recording")]
-    AlreadyRecording,
-
-    #[allow(dead_code)]
-    #[error("Audio device disconnected")]
-    DeviceDisconnected,
-
-    #[allow(dead_code)]
-    #[error("Stream error: {0}")]
-    StreamError(String),
 }
 
 /// Audio buffer containing recorded samples
@@ -349,58 +335,36 @@ impl AudioBuffer {
     }
 }
 
-/// Audio recorder for capturing microphone input
+/// Audio recorder for capturing microphone input.
 ///
-/// Supports two modes:
-/// - **Legacy mode**: Create with `new()`, use `start()`/`stop()` for recording
-/// - **Always-on mode**: Create with `new_always_on()`, use `mark()`/`extract()`
+/// Uses an always-on ring buffer for low-latency capture:
+/// - Audio stream runs continuously in the background
+/// - Ring buffer stores recent audio (configurable duration)
+/// - `mark()` and `extract_chunk()` for zero-latency capture
 pub struct AudioRecorder {
     device: Device,
     config: StreamConfig,
-    /// Legacy mode: recording flag
-    recording: Arc<AtomicBool>,
-    /// Legacy mode: sample buffer
-    #[allow(dead_code)]
-    samples: Arc<Mutex<Vec<f32>>>,
-    /// Stream (always running in always-on mode)
+    /// Running audio stream
     stream: Option<Stream>,
     device_sample_rate: u32,
-    /// Always-on mode: ring buffer for continuous capture
-    ring_buffer: Option<Arc<AudioRingBuffer>>,
-    /// Always-on mode: whether stream is always running
-    always_on: bool,
+    /// Ring buffer for continuous capture
+    ring_buffer: Arc<AudioRingBuffer>,
     /// Resampling quality setting
     resampling_quality: ResamplingQuality,
 }
 
 impl AudioRecorder {
-    /// Create a new audio recorder using the default input device (legacy mode)
+    /// Create a new always-on audio recorder.
     ///
-    /// In legacy mode, call `start()` to begin recording and `stop()` to end.
-    #[allow(dead_code)]
-    pub fn new() -> Result<Self, AudioRecorderError> {
-        Self::new_internal(None, ResamplingQuality::default())
-    }
-
-    /// Create a new always-on audio recorder
-    ///
-    /// In always-on mode, the audio stream starts immediately and continuously
-    /// fills a ring buffer. Use `mark()` when the hotkey is pressed and
-    /// `extract()` when released for instant audio capture with no startup delay.
+    /// The audio stream starts immediately and continuously fills a ring buffer.
+    /// Use `mark()` when the hotkey is pressed and `extract_chunk()` for
+    /// instant audio capture with no startup delay.
     ///
     /// # Arguments
-    /// * `prebuffer_secs` - Duration of audio to buffer (default: 30.0 seconds)
+    /// * `prebuffer_secs` - Duration of audio to buffer (e.g., 30.0 seconds)
     /// * `resampling_quality` - Quality of audio resampling (low=linear, high=sinc)
     pub fn new_always_on(
         prebuffer_secs: f32,
-        resampling_quality: ResamplingQuality,
-    ) -> Result<Self, AudioRecorderError> {
-        Self::new_internal(Some(prebuffer_secs), resampling_quality)
-    }
-
-    /// Internal constructor
-    fn new_internal(
-        prebuffer_secs: Option<f32>,
         resampling_quality: ResamplingQuality,
     ) -> Result<Self, AudioRecorderError> {
         let host = cpal::default_host();
@@ -430,38 +394,27 @@ impl AudioRecorder {
             buffer_size: cpal::BufferSize::Default,
         };
 
-        let always_on = prebuffer_secs.is_some();
-        let ring_buffer = prebuffer_secs.map(|secs| {
-            // Create ring buffer at device sample rate (we resample on extract)
-            Arc::new(AudioRingBuffer::new(secs, device_sample_rate))
-        });
+        // Create ring buffer at device sample rate (we resample on extract)
+        let ring_buffer = Arc::new(AudioRingBuffer::new(prebuffer_secs, device_sample_rate));
 
         let mut recorder = Self {
             device,
             config,
-            recording: Arc::new(AtomicBool::new(false)),
-            samples: Arc::new(Mutex::new(Vec::new())),
             stream: None,
             device_sample_rate,
             ring_buffer,
-            always_on,
             resampling_quality,
         };
 
-        // In always-on mode, start the stream immediately
-        if always_on {
-            recorder.start_always_on_stream()?;
-        }
+        // Start the stream immediately
+        recorder.start_stream()?;
 
         Ok(recorder)
     }
 
-    /// Start the always-on stream (internal)
-    fn start_always_on_stream(&mut self) -> Result<(), AudioRecorderError> {
-        let ring_buffer = self
-            .ring_buffer
-            .clone()
-            .expect("ring buffer required for always-on mode");
+    /// Start the audio stream (internal).
+    fn start_stream(&mut self) -> Result<(), AudioRecorderError> {
+        let ring_buffer = self.ring_buffer.clone();
         let err_fn = |err| error!("Audio stream error: {}", err);
 
         let stream = self
@@ -481,12 +434,12 @@ impl AudioRecorder {
             .map_err(|e| AudioRecorderError::StreamStartFailed(e.to_string()))?;
 
         self.stream = Some(stream);
-        info!("Always-on audio stream started");
+        info!("Audio stream started");
 
         Ok(())
     }
 
-    /// List available audio input devices
+    /// List available audio input devices.
     #[allow(dead_code)]
     pub fn list_devices() -> Vec<String> {
         let host = cpal::default_host();
@@ -495,271 +448,40 @@ impl AudioRecorder {
             .unwrap_or_default()
     }
 
-    /// Start recording audio
-    #[allow(dead_code)]
-    pub fn start(&mut self) -> Result<(), AudioRecorderError> {
-        if self.recording.load(Ordering::SeqCst) {
-            return Err(AudioRecorderError::AlreadyRecording);
-        }
-
-        // Clear previous samples
-        {
-            // Use unwrap_or_else to handle poisoned mutex (shouldn't happen, but be safe)
-            let mut samples = self.samples.lock().unwrap_or_else(|poisoned| {
-                warn!("Samples mutex was poisoned, recovering");
-                poisoned.into_inner()
-            });
-            samples.clear();
-        }
-
-        self.recording.store(true, Ordering::SeqCst);
-
-        let recording = self.recording.clone();
-        let samples = self.samples.clone();
-
-        // Build the input stream
-        let err_fn = |err| error!("Audio stream error: {}", err);
-
-        let stream = self
-            .device
-            .build_input_stream(
-                &self.config,
-                move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                    if recording.load(Ordering::SeqCst) {
-                        // Use if let to silently skip on poisoned mutex (audio callback can't panic)
-                        if let Ok(mut samples_guard) = samples.lock() {
-                            samples_guard.extend_from_slice(data);
-                        }
-                    }
-                },
-                err_fn,
-                None,
-            )
-            .map_err(|e| AudioRecorderError::StreamBuildFailed(e.to_string()))?;
-
-        stream
-            .play()
-            .map_err(|e| AudioRecorderError::StreamStartFailed(e.to_string()))?;
-
-        self.stream = Some(stream);
-        debug!("Audio recording started");
-
-        Ok(())
-    }
-
-    /// Stop recording and return the audio buffer
-    #[allow(dead_code)]
-    pub fn stop(&mut self) -> Result<AudioBuffer, AudioRecorderError> {
-        if !self.recording.load(Ordering::SeqCst) {
-            return Err(AudioRecorderError::NotRecording);
-        }
-
-        self.recording.store(false, Ordering::SeqCst);
-
-        // Drop the stream to stop recording
-        self.stream = None;
-
-        // Get the recorded samples
-        let samples = {
-            let samples_guard = self.samples.lock().unwrap_or_else(|poisoned| {
-                warn!("Samples mutex was poisoned, recovering");
-                poisoned.into_inner()
-            });
-            samples_guard.clone()
-        };
-
-        debug!(
-            "Audio recording stopped: {} samples ({:.2}s at {} Hz)",
-            samples.len(),
-            samples.len() as f32 / self.device_sample_rate as f32,
-            self.device_sample_rate
-        );
-
-        // Resample to 16kHz if needed
-        let resampled = if self.device_sample_rate != SAMPLE_RATE {
-            resample(
-                &samples,
-                self.device_sample_rate,
-                SAMPLE_RATE,
-                self.resampling_quality,
-            )
-        } else {
-            samples
-        };
-
-        let mut buffer = AudioBuffer {
-            samples: resampled,
-            sample_rate: SAMPLE_RATE,
-        };
-
-        if !buffer.is_valid() {
-            warn!(
-                "Recording too short: {:.2}s (minimum {:.2}s)",
-                buffer.duration_secs(),
-                MIN_DURATION_SECS
-            );
-            return Err(AudioRecorderError::TooShort);
-        }
-
-        // Pad with silence if shorter than Whisper's minimum (1000ms)
-        if buffer.duration_secs() < WHISPER_MIN_DURATION_SECS {
-            let samples_needed = (SAMPLE_RATE as f32 * WHISPER_MIN_DURATION_SECS) as usize;
-            let padding = samples_needed - buffer.samples.len();
-            debug!(
-                "Padding audio with {} samples of silence ({:.0}ms)",
-                padding,
-                padding as f32 / SAMPLE_RATE as f32 * 1000.0
-            );
-            buffer.samples.extend(vec![0.0f32; padding]);
-        }
-
-        info!(
-            "Captured audio: {:.2}s ({} samples)",
-            buffer.duration_secs(),
-            buffer.samples.len()
-        );
-
-        Ok(buffer)
-    }
-
-    /// Check if currently recording
-    #[allow(dead_code)]
-    pub fn is_recording(&self) -> bool {
-        self.recording.load(Ordering::SeqCst)
-    }
-
-    // ========================================================================
-    // Always-on mode methods
-    // ========================================================================
-
-    /// Mark the current position in the ring buffer (always-on mode)
+    /// Mark the current position in the ring buffer.
     ///
     /// Call this when the hotkey is pressed. The returned mark can be used
-    /// with `extract()` when the hotkey is released.
-    ///
-    /// # Panics
-    /// Panics if not in always-on mode (use `new_always_on()` to create).
+    /// with `extract_chunk()` when the hotkey is released.
     pub fn mark(&self) -> AudioMark {
-        let ring_buffer = self
-            .ring_buffer
-            .as_ref()
-            .expect("mark() requires always-on mode (use new_always_on())");
-
-        let mark = ring_buffer.mark();
+        let mark = self.ring_buffer.mark();
         debug!("Marked audio position (sequence_id: {})", mark.sequence_id);
         mark
     }
 
-    /// Extract audio from the mark position to now (always-on mode)
-    ///
-    /// Call this when the hotkey is released. Returns all audio recorded
-    /// since the mark was created.
-    ///
-    /// # Arguments
-    /// * `mark` - The mark created when recording started
-    ///
-    /// # Returns
-    /// AudioBuffer with resampled audio at 16kHz, or error if too short.
-    #[allow(dead_code)]
-    pub fn extract(&self, mark: &AudioMark) -> Result<AudioBuffer, AudioRecorderError> {
-        let ring_buffer = self
-            .ring_buffer
-            .as_ref()
-            .expect("extract() requires always-on mode (use new_always_on())");
-
-        let samples = ring_buffer.extract_since(mark);
-        let duration_secs = samples.len() as f32 / self.device_sample_rate as f32;
-
-        debug!(
-            "Extracted {:.2}s of audio from ring buffer (sequence_id: {})",
-            duration_secs, mark.sequence_id
-        );
-
-        // Check minimum duration
-        if duration_secs < MIN_DURATION_SECS {
-            warn!(
-                "Recording too short: {:.2}s (minimum {:.2}s)",
-                duration_secs, MIN_DURATION_SECS
-            );
-            return Err(AudioRecorderError::TooShort);
-        }
-
-        // Resample to 16kHz if needed
-        let resampled = if self.device_sample_rate != SAMPLE_RATE {
-            resample(
-                &samples,
-                self.device_sample_rate,
-                SAMPLE_RATE,
-                self.resampling_quality,
-            )
-        } else {
-            samples
-        };
-
-        let mut buffer = AudioBuffer {
-            samples: resampled,
-            sample_rate: SAMPLE_RATE,
-        };
-
-        // Pad with silence if shorter than Whisper's minimum (1000ms)
-        if buffer.duration_secs() < WHISPER_MIN_DURATION_SECS {
-            let samples_needed = (SAMPLE_RATE as f32 * WHISPER_MIN_DURATION_SECS) as usize;
-            let padding = samples_needed - buffer.samples.len();
-            debug!(
-                "Padding audio with {} samples of silence ({:.0}ms)",
-                padding,
-                padding as f32 / SAMPLE_RATE as f32 * 1000.0
-            );
-            buffer.samples.extend(vec![0.0f32; padding]);
-        }
-
-        info!(
-            "Extracted audio: {:.2}s ({} samples, sequence_id: {})",
-            buffer.duration_secs(),
-            buffer.samples.len(),
-            mark.sequence_id
-        );
-
-        Ok(buffer)
-    }
-
-    /// Shutdown the always-on stream
+    /// Shutdown the audio stream.
     ///
     /// Call this when the daemon is shutting down to release audio resources.
     #[allow(dead_code)]
     pub fn shutdown(&mut self) {
-        if self.always_on {
-            self.stream = None;
-            info!("Always-on audio stream stopped");
-        }
-    }
-
-    /// Check if in always-on mode
-    #[allow(dead_code)]
-    pub fn is_always_on(&self) -> bool {
-        self.always_on
+        self.stream = None;
+        info!("Audio stream stopped");
     }
 
     /// Get access to the ring buffer (for wake word detection, etc.)
     #[allow(dead_code)]
-    pub fn ring_buffer(&self) -> Option<&Arc<AudioRingBuffer>> {
-        self.ring_buffer.as_ref()
+    pub fn ring_buffer(&self) -> &Arc<AudioRingBuffer> {
+        &self.ring_buffer
     }
 
-    /// Get the current position in the ring buffer (always-on mode)
+    /// Get the current position in the ring buffer.
     ///
     /// Used for streaming chunk extraction. Save this position after
     /// extracting a chunk to know where to start the next one.
     pub fn current_position(&self) -> usize {
-        let ring_buffer = self
-            .ring_buffer
-            .as_ref()
-            .expect("current_position() requires always-on mode");
-
-        ring_buffer.current_position()
+        self.ring_buffer.current_position()
     }
 
-    /// Extract a chunk of audio from one position to another (always-on mode)
+    /// Extract a chunk of audio from one position to another.
     ///
     /// Used for streaming chunk extraction during recording. Call this
     /// periodically (e.g., every 5 seconds) to get chunks for transcription.
@@ -771,12 +493,7 @@ impl AudioRecorder {
     /// # Returns
     /// AudioBuffer with resampled audio at 16kHz, or None if too short.
     pub fn extract_chunk(&self, from_pos: usize, to_pos: usize) -> Option<AudioBuffer> {
-        let ring_buffer = self
-            .ring_buffer
-            .as_ref()
-            .expect("extract_chunk() requires always-on mode");
-
-        let samples = ring_buffer.extract_range(from_pos, to_pos);
+        let samples = self.ring_buffer.extract_range(from_pos, to_pos);
         let duration_secs = samples.len() as f32 / self.device_sample_rate as f32;
 
         if samples.is_empty() || duration_secs < MIN_DURATION_SECS {
@@ -846,7 +563,7 @@ impl AudioRecorder {
         self.device.name().unwrap_or_else(|_| "unknown".to_string())
     }
 
-    /// Try to reinitialize with a new default device
+    /// Try to reinitialize with a new default device.
     ///
     /// Call this when the current device is disconnected and a new one becomes available.
     /// Returns the new device name on success.
@@ -890,25 +607,15 @@ impl AudioRecorder {
         self.config = config;
         self.device_sample_rate = device_sample_rate;
 
-        // If always-on mode, create new ring buffer and start stream
-        if self.always_on {
-            // Get prebuffer duration from existing ring buffer
-            let prebuffer_secs = self
-                .ring_buffer
-                .as_ref()
-                .map(|rb| rb.duration_secs())
-                .unwrap_or(30.0);
+        // Get prebuffer duration from existing ring buffer
+        let prebuffer_secs = self.ring_buffer.duration_secs();
 
-            // Create new ring buffer at new device sample rate
-            self.ring_buffer = Some(Arc::new(AudioRingBuffer::new(
-                prebuffer_secs,
-                device_sample_rate,
-            )));
+        // Create new ring buffer at new device sample rate
+        self.ring_buffer = Arc::new(AudioRingBuffer::new(prebuffer_secs, device_sample_rate));
 
-            // Start the new stream
-            self.start_always_on_stream()?;
-            info!("Audio stream reinitialized successfully");
-        }
+        // Start the new stream
+        self.start_stream()?;
+        info!("Audio stream reinitialized successfully");
 
         Ok(device_name)
     }
