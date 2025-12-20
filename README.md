@@ -7,16 +7,20 @@ Press a hotkey, speak, release — your words appear where your cursor is. Power
 ## Features
 
 - **Push-to-talk** — Hold key to record, release to transcribe
-- **Local processing** — All AI runs on your machine (GPU or CPU)
+- **Toggle mode** — Press to start, press again to stop
+- **Local AI** — All processing on your machine, no internet needed
+- **GPU accelerated** — Fast transcription with CUDA (works on CPU too)
 - **Auto-paste** — Text appears where your cursor is
-- **Translation mode** — Speak in any language, get English text
-- **Audio preprocessing** — RMS normalization, compression, and limiting for cleaner audio
-- **System tray** — Background daemon with tray icon and preferences GUI
-- **LLM correction** — Optional grammar/punctuation fix via Ollama
-- **Cross-platform** — Linux, macOS, Windows
-- **Wayland native** — Full KDE Plasma / GNOME support
+- **Translation** — Speak any language, get English text
+- **LLM correction** — Optional grammar fix via Ollama
+- **Audio preprocessing** — Normalization, compression, limiting
+- **Streaming** — Real-time transcription for long recordings
+- **System tray** — Background daemon with tray icon
+- **Preferences GUI** — Easy configuration (Linux)
+- **Wayland native** — Full KDE/GNOME/Sway support
 - **Terminal mode** — Works in TTY without X server
-- **Open source** — MIT licensed, no telemetry, no cloud
+- **Crash recovery** — Detailed diagnostics when things go wrong
+- **Open source** — MIT licensed, no telemetry
 
 ## Quick Start
 
@@ -31,16 +35,42 @@ openhush model download small
 openhush start
 
 # Default hotkey: Right Ctrl (hold to record)
-# Open preferences GUI
-openhush preferences
+```
+
+## CLI Commands
+
+```bash
+openhush start              # Start daemon
+openhush start --foreground # Run in foreground
+openhush stop               # Stop daemon
+openhush status             # Check if running
+openhush preferences        # Open settings GUI (Linux)
+
+openhush config --show      # View config
+openhush config --hotkey F12
+openhush config --model large-v3
+openhush config --language de
+openhush config --translate true
+openhush config --llm ollama:llama3.2:3b
+
+openhush model list         # Show available models
 ```
 
 ## Requirements
 
-- **GPU (recommended)**: NVIDIA with CUDA drivers
+- **GPU (recommended)**: NVIDIA with CUDA
 - **CPU**: Works without GPU (slower)
 - **RAM**: 4-8GB depending on model
-- **Disk**: 75MB - 3GB for model files
+
+### Models
+
+| Model | Size | Speed | Accuracy |
+|-------|------|-------|----------|
+| tiny | 75MB | Fastest | Basic |
+| base | 142MB | Fast | Good |
+| small | 466MB | Balanced | Better |
+| medium | 1.5GB | Slower | High |
+| large-v3 | 3GB | Slowest | Best |
 
 ## Configuration
 
@@ -52,23 +82,10 @@ key = "ControlRight"
 mode = "push_to_talk"  # or "toggle"
 
 [transcription]
-model = "small"        # tiny, base, small, medium, large-v3
+model = "large-v3"     # tiny, base, small, medium, large-v3
 language = "auto"      # or "en", "de", etc.
 device = "cuda"        # or "cpu"
 translate = false      # true = translate to English
-
-[audio]
-preprocessing = false  # enable audio preprocessing
-[audio.normalization]
-enabled = true
-target_db = -18.0
-[audio.compression]
-enabled = true
-threshold_db = -20.0
-ratio = 4.0
-[audio.limiter]
-enabled = true
-threshold_db = -3.0
 
 [output]
 clipboard = true
@@ -78,51 +95,57 @@ paste = true
 enabled = false
 ollama_model = "llama3.2:3b"
 
-[queue]
-chunk_interval_secs = 0     # 0 = auto-tune based on GPU benchmark
-chunk_safety_margin = 0.2   # 20% safety margin for auto-tuned interval
+[feedback]
+audio = true           # Beep sounds
+visual = true          # Desktop notifications
+
+[audio]
+preprocessing = false  # Enable audio processing
 ```
-
-### Auto-tuned Streaming
-
-OpenHush automatically benchmarks your GPU at startup to determine the optimal chunk interval for streaming transcription. This ensures:
-- Fast feedback without chunks queuing up
-- Optimal performance across different GPUs (RTX 3090 → GTX 1060)
-- No manual tuning required
-
-Set `chunk_interval_secs = 5.0` (or another value) to override auto-tuning.
 
 ## Platforms
 
-| Platform | Status | Paste Method |
-|----------|--------|--------------|
-| Linux X11 | ✅ | xdotool/enigo |
-| Linux Wayland | ✅ | wtype |
-| Linux TTY | ✅ | evdev |
-| macOS | 🚧 | CGEvent |
-| Windows | 🚧 | SendInput |
+| Platform | Status | Notes |
+|----------|--------|-------|
+| Linux X11 | Full | Recommended |
+| Linux Wayland | Full | KDE/GNOME/Sway |
+| Linux TTY | Full | Terminal mode |
+| macOS | WIP | Coming soon |
+| Windows | WIP | Coming soon |
 
 ## Building from Source
 
 ```bash
-# Clone
 git clone https://github.com/claymore666/openhush.git
 cd openhush
-
-# Build (release)
 cargo build --release
-
-# With CUDA support
-cargo build --release --features cuda
-
-# Install
 cargo install --path .
 ```
+
+### Linux Dependencies
+
+```bash
+# Debian/Ubuntu
+sudo apt install libasound2-dev libgtk-3-dev libxdo-dev
+
+# Fedora
+sudo dnf install alsa-lib-devel gtk3-devel libxdo-devel
+
+# Arch
+sudo pacman -S alsa-lib gtk3 xdotool
+```
+
+## Troubleshooting
+
+```bash
+openhush status          # Check if running
+openhush stop            # Stop existing daemon
+openhush start -f -v     # Foreground with verbose logging
+```
+
+Logs: `~/.local/share/openhush/openhush.log`
+Crash reports: `~/.local/share/openhush/crash.log`
 
 ## License
 
 MIT License — see [LICENSE](LICENSE)
-
-## Contributing
-
-Contributions welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting PRs.
