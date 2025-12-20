@@ -22,6 +22,24 @@ Press a hotkey, speak, release — your words appear where your cursor is. Power
 - **Crash recovery** — Detailed diagnostics when things go wrong
 - **Open source** — MIT licensed, no telemetry
 
+### Planned
+
+- **Wake word** — "Hey OpenHush" hands-free activation
+- **Continuous dictation** — Voice activity detection (Silero-VAD)
+- **Noise reduction** — RNNoise background noise removal
+- **Custom vocabulary** — Domain-specific terms and names
+- **Filler word removal** — Remove "um", "uh", "like" via LLM
+- **Text snippets** — Expand shortcuts (e.g., "sig" → full signature)
+- **Post-transcription actions** — Run shell commands or API calls
+- **System audio capture** — Transcribe meetings with speaker labels
+- **App-aware context** — Different settings per application
+- **macOS support** — Native macOS integration
+- **Windows support** — Native Windows integration
+- **Flatpak / AUR** — Easy installation packages
+- **Dark mode** — Theme support for preferences GUI
+- **Onboarding wizard** — First-run setup guide
+- **Plugin system** — Community extensions
+
 ## Quick Start
 
 ```bash
