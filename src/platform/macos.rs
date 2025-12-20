@@ -20,8 +20,12 @@ impl MacOSPlatform {
 }
 
 impl Default for MacOSPlatform {
+    /// Creates a MacOSPlatform with default settings.
+    ///
+    /// This cannot panic as `MacOSPlatform::new()` always succeeds.
     fn default() -> Self {
-        Self::new().expect("Failed to create MacOSPlatform")
+        // MacOSPlatform::new() is infallible (returns empty struct)
+        Self::new().expect("MacOSPlatform::new is infallible")
     }
 }
 

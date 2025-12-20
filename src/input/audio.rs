@@ -50,6 +50,14 @@ pub enum AudioRecorderError {
     #[allow(dead_code)]
     #[error("Already recording")]
     AlreadyRecording,
+
+    #[allow(dead_code)]
+    #[error("Audio device disconnected")]
+    DeviceDisconnected,
+
+    #[allow(dead_code)]
+    #[error("Stream error: {0}")]
+    StreamError(String),
 }
 
 /// Audio buffer containing recorded samples
@@ -381,7 +389,11 @@ impl AudioRecorder {
 
         // Clear previous samples
         {
-            let mut samples = self.samples.lock().unwrap();
+            // Use unwrap_or_else to handle poisoned mutex (shouldn't happen, but be safe)
+            let mut samples = self.samples.lock().unwrap_or_else(|poisoned| {
+                warn!("Samples mutex was poisoned, recovering");
+                poisoned.into_inner()
+            });
             samples.clear();
         }
 
@@ -399,8 +411,10 @@ impl AudioRecorder {
                 &self.config,
                 move |data: &[f32], _: &cpal::InputCallbackInfo| {
                     if recording.load(Ordering::SeqCst) {
-                        let mut samples_guard = samples.lock().unwrap();
-                        samples_guard.extend_from_slice(data);
+                        // Use if let to silently skip on poisoned mutex (audio callback can't panic)
+                        if let Ok(mut samples_guard) = samples.lock() {
+                            samples_guard.extend_from_slice(data);
+                        }
                     }
                 },
                 err_fn,
@@ -432,7 +446,10 @@ impl AudioRecorder {
 
         // Get the recorded samples
         let samples = {
-            let samples_guard = self.samples.lock().unwrap();
+            let samples_guard = self.samples.lock().unwrap_or_else(|poisoned| {
+                warn!("Samples mutex was poisoned, recovering");
+                poisoned.into_inner()
+            });
             samples_guard.clone()
         };
 
@@ -677,6 +694,108 @@ impl AudioRecorder {
 
         Some(buffer)
     }
+
+    /// Check if the current audio device is still available
+    ///
+    /// Returns true if the device is available, false if disconnected.
+    #[allow(dead_code)]
+    pub fn is_device_available(&self) -> bool {
+        // Try to get the device name - if this fails, device is likely disconnected
+        match self.device.name() {
+            Ok(_) => {
+                // Also check if we can still get a config
+                self.device.default_input_config().is_ok()
+            }
+            Err(_) => false,
+        }
+    }
+
+    /// Get the current device name
+    #[allow(dead_code)]
+    pub fn device_name(&self) -> String {
+        self.device.name().unwrap_or_else(|_| "unknown".to_string())
+    }
+
+    /// Try to reinitialize with a new default device
+    ///
+    /// Call this when the current device is disconnected and a new one becomes available.
+    /// Returns the new device name on success.
+    #[allow(dead_code)]
+    pub fn try_reinitialize(&mut self) -> Result<String, AudioRecorderError> {
+        info!("Attempting to reinitialize audio capture...");
+
+        // Stop the current stream
+        self.stream = None;
+
+        let host = cpal::default_host();
+
+        // Try to get a new default device
+        let device = host
+            .default_input_device()
+            .ok_or(AudioRecorderError::NoInputDevice)?;
+
+        let device_name = device.name().unwrap_or_else(|_| "unknown".to_string());
+        info!("Found new audio device: {}", device_name);
+
+        // Get new config
+        let supported_config = device
+            .default_input_config()
+            .map_err(|e| AudioRecorderError::NoInputConfig(e.to_string()))?;
+
+        let device_sample_rate = supported_config.sample_rate().0;
+        info!(
+            "Device sample rate: {} Hz (will resample to {} Hz)",
+            device_sample_rate, SAMPLE_RATE
+        );
+
+        // Build new config
+        let config = StreamConfig {
+            channels: 1,
+            sample_rate: SampleRate(device_sample_rate),
+            buffer_size: cpal::BufferSize::Default,
+        };
+
+        // Update fields
+        self.device = device;
+        self.config = config;
+        self.device_sample_rate = device_sample_rate;
+
+        // If always-on mode, create new ring buffer and start stream
+        if self.always_on {
+            // Get prebuffer duration from existing ring buffer
+            let prebuffer_secs = self
+                .ring_buffer
+                .as_ref()
+                .map(|rb| rb.duration_secs())
+                .unwrap_or(30.0);
+
+            // Create new ring buffer at new device sample rate
+            self.ring_buffer = Some(Arc::new(AudioRingBuffer::new(
+                prebuffer_secs,
+                device_sample_rate,
+            )));
+
+            // Start the new stream
+            self.start_always_on_stream()?;
+            info!("Audio stream reinitialized successfully");
+        }
+
+        Ok(device_name)
+    }
+}
+
+/// Check if any audio input device is available
+#[allow(dead_code)]
+pub fn has_input_device() -> bool {
+    let host = cpal::default_host();
+    host.default_input_device().is_some()
+}
+
+/// Get the name of the default input device, if any
+#[allow(dead_code)]
+pub fn default_device_name() -> Option<String> {
+    let host = cpal::default_host();
+    host.default_input_device().and_then(|d| d.name().ok())
 }
 
 /// Simple linear resampling

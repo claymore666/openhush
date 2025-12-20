@@ -7,6 +7,7 @@
 
 pub mod worker;
 
+use crate::config::BackpressureStrategy;
 use crate::input::AudioBuffer;
 use std::collections::{BTreeMap, HashSet};
 
@@ -84,21 +85,97 @@ impl TranscriptionTracker {
     }
 
     /// Add a pending transcription job.
-    pub fn add_pending(&mut self, sequence_id: u64, chunk_id: u32) {
+    ///
+    /// Returns true if the job was accepted, false if it was rejected due to backpressure.
+    #[allow(dead_code)]
+    pub fn add_pending(&mut self, sequence_id: u64, chunk_id: u32) -> bool {
+        self.add_pending_with_config(sequence_id, chunk_id, 10, 8, BackpressureStrategy::Warn)
+    }
+
+    /// Add a pending transcription job with explicit backpressure configuration.
+    ///
+    /// # Arguments
+    /// * `sequence_id` - Recording sequence ID
+    /// * `chunk_id` - Chunk ID within the recording
+    /// * `max_pending` - Maximum pending jobs (0 = unlimited)
+    /// * `high_water_mark` - Warn when reaching this depth
+    /// * `strategy` - Backpressure strategy enum
+    ///
+    /// # Returns
+    /// * `true` if job was accepted
+    /// * `false` if job was rejected (DropNewest strategy)
+    pub fn add_pending_with_config(
+        &mut self,
+        sequence_id: u64,
+        chunk_id: u32,
+        max_pending: u32,
+        high_water_mark: u32,
+        strategy: BackpressureStrategy,
+    ) -> bool {
+        let pending_count = self.pending.len();
+        let max_pending = max_pending as usize;
+        let high_water_mark = high_water_mark as usize;
+
+        // Check if at capacity (0 means unlimited)
+        if max_pending > 0 && pending_count >= max_pending {
+            match strategy {
+                BackpressureStrategy::DropOldest => {
+                    // Drop the oldest pending job to make room
+                    if let Some(&oldest_key) = self.pending.iter().min() {
+                        self.pending.remove(&oldest_key);
+                        tracing::warn!(
+                            "Backpressure: dropped oldest job (seq {}.{}) to accept (seq {}.{})",
+                            oldest_key.0,
+                            oldest_key.1,
+                            sequence_id,
+                            chunk_id
+                        );
+                    }
+                }
+                BackpressureStrategy::DropNewest => {
+                    tracing::warn!(
+                        "Backpressure: rejecting job (seq {}.{}) - queue full ({}/{})",
+                        sequence_id,
+                        chunk_id,
+                        pending_count,
+                        max_pending
+                    );
+                    return false;
+                }
+                BackpressureStrategy::Warn => {
+                    tracing::warn!(
+                        "Queue at capacity ({}/{}) but accepting job anyway",
+                        pending_count,
+                        max_pending
+                    );
+                }
+            }
+        } else if high_water_mark > 0 && pending_count >= high_water_mark {
+            // Approaching capacity - log warning
+            tracing::warn!(
+                "Queue depth {} approaching limit {} - transcription falling behind",
+                pending_count,
+                max_pending
+            );
+        }
+
         self.pending.insert((sequence_id, chunk_id));
         tracing::debug!(
-            "Added pending transcription (seq {}.{})",
+            "Added pending transcription (seq {}.{}), queue depth: {}",
             sequence_id,
-            chunk_id
+            chunk_id,
+            self.pending.len()
         );
 
-        // Warn if queue is growing (transcription falling behind)
-        let pending_count = self.pending.len();
-        if pending_count >= 3 {
-            tracing::warn!(
-                "Transcription queue has {} pending jobs - consider increasing chunk_interval_secs",
-                pending_count
-            );
+        true
+    }
+
+    /// Get current queue statistics
+    #[allow(dead_code)]
+    pub fn stats(&self) -> QueueStats {
+        QueueStats {
+            pending_count: self.pending.len(),
+            waiting_count: self.completed.len(),
         }
     }
 
@@ -216,6 +293,16 @@ impl TranscriptionTracker {
     }
 }
 
+/// Queue statistics for monitoring
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct QueueStats {
+    /// Number of jobs currently being transcribed
+    pub pending_count: usize,
+    /// Number of completed results waiting for output
+    pub waiting_count: usize,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -311,5 +398,64 @@ mod tests {
         tracker.add_result(result(0, 0, "test", false));
         assert_eq!(tracker.pending_count(), 1);
         assert_eq!(tracker.waiting_count(), 1);
+    }
+
+    #[test]
+    fn test_backpressure_drop_newest() {
+        let mut tracker = TranscriptionTracker::new();
+
+        // Fill up to max_pending (3)
+        assert!(tracker.add_pending_with_config(0, 0, 3, 2, BackpressureStrategy::DropNewest));
+        assert!(tracker.add_pending_with_config(0, 1, 3, 2, BackpressureStrategy::DropNewest));
+        assert!(tracker.add_pending_with_config(0, 2, 3, 2, BackpressureStrategy::DropNewest));
+
+        // At capacity - next should be rejected
+        assert!(!tracker.add_pending_with_config(0, 3, 3, 2, BackpressureStrategy::DropNewest));
+        assert_eq!(tracker.pending_count(), 3);
+    }
+
+    #[test]
+    fn test_backpressure_drop_oldest() {
+        let mut tracker = TranscriptionTracker::new();
+
+        // Fill up to max_pending (3)
+        assert!(tracker.add_pending_with_config(0, 0, 3, 2, BackpressureStrategy::DropOldest));
+        assert!(tracker.add_pending_with_config(0, 1, 3, 2, BackpressureStrategy::DropOldest));
+        assert!(tracker.add_pending_with_config(0, 2, 3, 2, BackpressureStrategy::DropOldest));
+
+        // At capacity - oldest should be dropped, new one accepted
+        assert!(tracker.add_pending_with_config(0, 3, 3, 2, BackpressureStrategy::DropOldest));
+        assert_eq!(tracker.pending_count(), 3);
+
+        // Oldest (0,0) should have been dropped
+        assert!(!tracker.pending.contains(&(0, 0)));
+        assert!(tracker.pending.contains(&(0, 3)));
+    }
+
+    #[test]
+    fn test_backpressure_warn_accepts() {
+        let mut tracker = TranscriptionTracker::new();
+
+        // Fill up to max_pending (3)
+        assert!(tracker.add_pending_with_config(0, 0, 3, 2, BackpressureStrategy::Warn));
+        assert!(tracker.add_pending_with_config(0, 1, 3, 2, BackpressureStrategy::Warn));
+        assert!(tracker.add_pending_with_config(0, 2, 3, 2, BackpressureStrategy::Warn));
+
+        // At capacity - warn strategy still accepts
+        assert!(tracker.add_pending_with_config(0, 3, 3, 2, BackpressureStrategy::Warn));
+        assert_eq!(tracker.pending_count(), 4);
+    }
+
+    #[test]
+    fn test_queue_stats() {
+        let mut tracker = TranscriptionTracker::new();
+
+        tracker.add_pending(0, 0);
+        tracker.add_pending(0, 1);
+        tracker.add_result(result(0, 0, "test", false));
+
+        let stats = tracker.stats();
+        assert_eq!(stats.pending_count, 1);
+        assert_eq!(stats.waiting_count, 1);
     }
 }

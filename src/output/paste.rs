@@ -103,9 +103,13 @@ fn paste_by_xdotool(text: &str) -> Result<(), PasteError> {
         use std::process::Command;
 
         // Check if xdotool is available
-        let check = Command::new("which").arg("xdotool").output();
+        let xdotool_available = Command::new("which")
+            .arg("xdotool")
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false);
 
-        if check.is_err() || !check.unwrap().status.success() {
+        if !xdotool_available {
             return Err(PasteError::MethodNotAvailable(
                 "xdotool not installed. Install with: sudo apt install xdotool".into(),
             ));

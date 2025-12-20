@@ -35,10 +35,32 @@ pub struct AudioRingBuffer {
     sequence_counter: AtomicU64,
 }
 
-// SAFETY: AudioRingBuffer is designed for single-producer single-consumer
-// The producer (cpal callback) only writes via push_samples
-// The consumer (daemon) only reads via extract_since
-// Write position is atomic, buffer access is carefully coordinated
+// SAFETY: AudioRingBuffer is safe to share across threads under specific conditions:
+//
+// 1. **Single-Producer Single-Consumer (SPSC) Design**:
+//    - Producer (cpal audio callback thread): Only calls `push_samples()`
+//    - Consumer (daemon main thread): Only calls `mark()`, `extract_since()`, `extract_range()`
+//
+// 2. **Memory Ordering Guarantees**:
+//    - `write_pos` is an AtomicUsize with proper ordering:
+//      - Producer uses `Release` ordering when updating write position
+//      - Consumer uses `Acquire` ordering when reading write position
+//    - This establishes happens-before relationship: consumer sees all writes
+//      that occurred before the write_pos update
+//
+// 3. **No Data Races**:
+//    - Producer only writes to buffer slots BEFORE updating write_pos
+//    - Consumer only reads slots that are BEHIND the observed write_pos
+//    - Even during wraparound, the consumer never reads a slot currently being written
+//
+// 4. **UnsafeCell Usage**:
+//    - The `buffer` field uses UnsafeCell to allow mutation from the producer
+//    - Access is coordinated through the atomic write_pos barrier
+//
+// 5. **Invariants**:
+//    - Producer must be single-threaded (cpal callback runs on one thread)
+//    - Consumer must not access slots ahead of write_pos
+//    - Wraparound detection prevents reading stale data
 unsafe impl Send for AudioRingBuffer {}
 unsafe impl Sync for AudioRingBuffer {}
 
@@ -111,7 +133,9 @@ impl AudioRingBuffer {
     /// # Safety
     /// This method must only be called from a single producer thread.
     pub fn push_samples(&self, samples: &[f32]) {
-        let write = self.write_pos.load(Ordering::Relaxed);
+        // Use Acquire to ensure proper memory ordering with Release store below.
+        // This ensures samples written before the store are visible to consumers.
+        let write = self.write_pos.load(Ordering::Acquire);
 
         // SAFETY: Single producer, we own the write position
         let buffer = unsafe { &mut *self.buffer.get() };

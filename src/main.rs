@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
 use tracing::info;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use tracing_appender::rolling::{RollingFileAppender, Rotation};
+use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 mod config;
 mod daemon;
@@ -9,6 +10,7 @@ mod engine;
 mod gui;
 mod input;
 mod output;
+mod panic_handler;
 mod platform;
 mod queue;
 #[cfg(target_os = "linux")]
@@ -110,23 +112,76 @@ enum ModelAction {
     },
 }
 
-fn init_logging(verbose: bool) {
+/// Guard that must be kept alive for file logging to work
+struct LogGuard {
+    _guard: Option<tracing_appender::non_blocking::WorkerGuard>,
+}
+
+fn init_logging(verbose: bool, foreground: bool) -> LogGuard {
     let filter = if verbose {
-        EnvFilter::new("openhush=debug,whisper_rs=info")
+        EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| EnvFilter::new("openhush=debug,whisper_rs=info"))
     } else {
-        EnvFilter::new("openhush=info,whisper_rs=warn")
+        EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| EnvFilter::new("openhush=info,whisper_rs=warn"))
     };
 
-    tracing_subscriber::registry()
-        .with(filter)
-        .with(tracing_subscriber::fmt::layer())
-        .init();
+    if foreground {
+        // Foreground mode: log to stdout with pretty formatting
+        tracing_subscriber::registry()
+            .with(filter)
+            .with(fmt::layer().with_target(true))
+            .init();
+
+        LogGuard { _guard: None }
+    } else {
+        // Daemon mode: log to file with rotation
+        let log_dir = config::Config::data_dir()
+            .map(|d| d.to_path_buf())
+            .unwrap_or_else(|_| std::env::temp_dir());
+
+        // Create log directory if needed
+        let _ = std::fs::create_dir_all(&log_dir);
+
+        // Daily rotation, keep logs for 7 days
+        let file_appender = RollingFileAppender::new(Rotation::DAILY, &log_dir, "openhush.log");
+
+        let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+
+        tracing_subscriber::registry()
+            .with(filter)
+            .with(
+                fmt::layer()
+                    .with_target(true)
+                    .with_ansi(false) // No colors in file
+                    .with_writer(non_blocking),
+            )
+            .init();
+
+        // Also log to stderr in daemon mode for immediate feedback
+        // (This won't work with the current setup, but the file logging is the important part)
+
+        LogGuard {
+            _guard: Some(guard),
+        }
+    }
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Install panic handler first, before anything else
+    panic_handler::install();
+
     let cli = Cli::parse();
-    init_logging(cli.verbose);
+
+    // Determine if we're running in foreground mode for logging
+    let foreground_mode = match &cli.command {
+        Commands::Start { foreground, .. } => *foreground,
+        _ => true, // All other commands run in foreground
+    };
+
+    // Initialize logging (keep guard alive for the duration of the program)
+    let _log_guard = init_logging(cli.verbose, foreground_mode);
 
     match cli.command {
         Commands::Start {

@@ -26,6 +26,9 @@ use tracing::{debug, error, info, warn};
 #[allow(clippy::single_component_path_imports)]
 use gtk;
 
+#[cfg(unix)]
+use daemonize::Daemonize;
+
 /// Channel buffer size for job and result queues
 const CHANNEL_BUFFER_SIZE: usize = 32;
 
@@ -57,6 +60,10 @@ pub enum DaemonError {
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+
+    #[cfg(unix)]
+    #[error("Daemonization failed: {0}")]
+    DaemonizeFailed(String),
 }
 
 /// Daemon state machine
@@ -220,7 +227,7 @@ impl Daemon {
 
         // Spawn transcription worker in dedicated thread
         let audio_config = self.config.audio.clone();
-        let _worker_handle = spawn_worker(engine, job_rx, result_tx, audio_config);
+        let worker_handle = spawn_worker(engine, job_rx, result_tx, audio_config)?;
         info!("Transcription worker started");
 
         // Result tracker for ordered output
@@ -230,8 +237,14 @@ impl Daemon {
         let (hotkey_listener, mut hotkey_rx) = HotkeyListener::new(&self.config.hotkey.key)?;
         hotkey_listener.start()?;
 
-        // Chunk separator (space by default)
-        let chunk_separator = &self.config.queue.separator;
+        // Chunk separator (space by default) - cloned to allow config reload
+        let mut chunk_separator = self.config.queue.separator.clone();
+
+        // Backpressure configuration
+        let max_pending = self.config.queue.max_pending;
+        let high_water_mark = self.config.queue.high_water_mark;
+        let backpressure_strategy = self.config.queue.backpressure_strategy;
+        let notify_on_backpressure = self.config.queue.notify_on_backpressure;
 
         // Streaming chunk interval (convert to Duration)
         let chunk_interval = if chunk_interval_secs > 0.0 {
@@ -256,8 +269,41 @@ impl Daemon {
             self.config.hotkey.key
         );
 
+        // Set up Unix signal handlers (SIGTERM, SIGHUP)
+        #[cfg(unix)]
+        let (mut sigterm, mut sighup) = setup_signal_handlers()?;
+
         // Main event loop
         loop {
+            // Poll Unix signals (non-blocking, at start of loop)
+            #[cfg(unix)]
+            {
+                // Use try_recv pattern via select with zero timeout
+                tokio::select! {
+                    biased;
+                    _ = sigterm.recv() => {
+                        info!("Shutdown signal received (SIGTERM)");
+                        break;
+                    }
+                    _ = sighup.recv() => {
+                        info!("SIGHUP received, reloading configuration...");
+                        match Config::load() {
+                            Ok(new_config) => {
+                                chunk_separator = new_config.queue.separator.clone();
+                                self.config = new_config;
+                                info!("Configuration reloaded successfully");
+                            }
+                            Err(e) => {
+                                error!("Failed to reload configuration: {}", e);
+                            }
+                        }
+                        continue; // Don't break, continue with new config
+                    }
+                    // Immediate timeout to make this non-blocking
+                    _ = tokio::time::sleep(std::time::Duration::ZERO) => {}
+                }
+            }
+
             // Process GTK events and tray (Linux only)
             #[cfg(target_os = "linux")]
             {
@@ -343,18 +389,37 @@ impl Daemon {
                                         next_chunk_id
                                     );
 
-                                    // Track pending transcription
-                                    tracker.add_pending(mark.sequence_id, next_chunk_id);
-
-                                    // Submit final job
-                                    let job = TranscriptionJob {
-                                        buffer,
-                                        sequence_id: mark.sequence_id,
-                                        chunk_id: next_chunk_id,
-                                        is_final: true,
-                                    };
-                                    if job_tx.send(job).await.is_err() {
-                                        error!("Failed to submit final transcription job");
+                                    // Track pending transcription with backpressure
+                                    let accepted = tracker.add_pending_with_config(
+                                        mark.sequence_id,
+                                        next_chunk_id,
+                                        max_pending,
+                                        high_water_mark,
+                                        backpressure_strategy,
+                                    );
+                                    if !accepted {
+                                        warn!(
+                                            "Final chunk rejected due to backpressure (seq {}.{})",
+                                            mark.sequence_id, next_chunk_id
+                                        );
+                                        #[cfg(unix)]
+                                        if notify_on_backpressure {
+                                            let _ = notify_rust::Notification::new()
+                                                .summary("OpenHush")
+                                                .body("Transcription queue full - audio dropped")
+                                                .show();
+                                        }
+                                    } else {
+                                        // Submit final job only if accepted
+                                        let job = TranscriptionJob {
+                                            buffer,
+                                            sequence_id: mark.sequence_id,
+                                            chunk_id: next_chunk_id,
+                                            is_final: true,
+                                        };
+                                        if job_tx.send(job).await.is_err() {
+                                            error!("Failed to submit final transcription job");
+                                        }
                                     }
                                 } else if next_chunk_id == 0 {
                                     // No chunks emitted and final chunk too short
@@ -457,34 +522,57 @@ impl Daemon {
                                 *next_chunk_id
                             );
 
-                            // Track pending transcription
-                            tracker.add_pending(mark.sequence_id, *next_chunk_id);
+                            // Track pending transcription with backpressure
+                            let accepted = tracker.add_pending_with_config(
+                                mark.sequence_id,
+                                *next_chunk_id,
+                                max_pending,
+                                high_water_mark,
+                                backpressure_strategy,
+                            );
+                            if !accepted {
+                                warn!(
+                                    "Streaming chunk rejected due to backpressure (seq {}.{})",
+                                    mark.sequence_id, *next_chunk_id
+                                );
+                                #[cfg(unix)]
+                                if notify_on_backpressure {
+                                    let _ = notify_rust::Notification::new()
+                                        .summary("OpenHush")
+                                        .body("Transcription queue full - audio dropped")
+                                        .show();
+                                }
+                                // Skip submitting the job but still update state
+                                *last_chunk_pos = current_pos;
+                                *next_chunk_id += 1;
+                            } else {
+                                // Submit chunk job only if accepted
+                                let job = TranscriptionJob {
+                                    buffer,
+                                    sequence_id: mark.sequence_id,
+                                    chunk_id: *next_chunk_id,
+                                    is_final: false,
+                                };
+                                if job_tx.send(job).await.is_err() {
+                                    error!("Failed to submit chunk transcription job");
+                                }
 
-                            // Submit chunk job
-                            let job = TranscriptionJob {
-                                buffer,
-                                sequence_id: mark.sequence_id,
-                                chunk_id: *next_chunk_id,
-                                is_final: false,
-                            };
-                            if job_tx.send(job).await.is_err() {
-                                error!("Failed to submit chunk transcription job");
+                                // Update state for next chunk
+                                *last_chunk_pos = current_pos;
+                                *next_chunk_id += 1;
                             }
-
-                            // Update state for next chunk
-                            *last_chunk_pos = current_pos;
-                            *next_chunk_id += 1;
                         } else {
                             debug!("Chunk too short, skipping");
                         }
                     }
                 }
 
-                // Handle shutdown signal
+                // Handle shutdown signal (Ctrl+C)
                 _ = tokio::signal::ctrl_c() => {
-                    info!("Shutdown signal received");
+                    info!("Shutdown signal received (SIGINT)");
                     break;
                 }
+
 
                 // Small sleep to prevent busy loop when checking tray
                 _ = tokio::time::sleep(tokio::time::Duration::from_millis(10)) => {}
@@ -493,10 +581,33 @@ impl Daemon {
 
         // Cleanup
         hotkey_listener.stop();
-        drop(job_tx); // Signal worker to stop
+        drop(job_tx); // Signal worker to stop by closing the channel
+
+        // Wait for worker thread to finish (with timeout)
+        info!("Waiting for transcription worker to finish...");
+        match worker_handle.join() {
+            Ok(()) => info!("Transcription worker stopped cleanly"),
+            Err(_) => warn!("Transcription worker thread panicked during shutdown"),
+        }
+
         info!("Daemon stopped");
         Ok(())
     }
+}
+
+/// Set up Unix signal handlers for the daemon
+///
+/// This is called from run_loop to set up SIGTERM and SIGHUP handling.
+/// Returns Result instead of panicking to allow graceful error handling.
+#[cfg(unix)]
+pub fn setup_signal_handlers(
+) -> Result<(tokio::signal::unix::Signal, tokio::signal::unix::Signal), std::io::Error> {
+    use tokio::signal::unix::{signal, SignalKind};
+
+    let sigterm = signal(SignalKind::terminate())?;
+    let sighup = signal(SignalKind::hangup())?;
+
+    Ok((sigterm, sighup))
 }
 
 /// Get the PID file path
@@ -516,6 +627,8 @@ fn is_running() -> bool {
                 if let Ok(pid) = pid_str.trim().parse::<i32>() {
                     #[cfg(unix)]
                     {
+                        // SAFETY: kill(pid, 0) is safe - it only checks if process exists,
+                        // doesn't send any signal. The pid is validated as i32 from the PID file.
                         let result = unsafe { libc::kill(pid, 0) };
                         return result == 0;
                     }
@@ -530,13 +643,30 @@ fn is_running() -> bool {
     false
 }
 
-/// Write PID file
+/// Write PID file atomically using O_CREAT | O_EXCL to prevent race conditions
 fn write_pid() -> Result<(), DaemonError> {
+    use std::io::Write;
+
     let path = pid_file()?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(&path, std::process::id().to_string())?;
+
+    // Use create_new() which maps to O_CREAT | O_EXCL - fails if file exists
+    // This prevents TOCTOU race between is_running() check and write
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::AlreadyExists {
+                DaemonError::AlreadyRunning
+            } else {
+                DaemonError::Io(e)
+            }
+        })?;
+
+    write!(file, "{}", std::process::id())?;
     Ok(())
 }
 
@@ -551,6 +681,9 @@ fn remove_pid() -> Result<(), DaemonError> {
 
 /// Start the daemon
 pub async fn run(foreground: bool, enable_tray: bool) -> Result<(), DaemonError> {
+    // Check for stale PID file and clean up if needed
+    check_and_cleanup_stale_pid()?;
+
     if is_running() {
         return Err(DaemonError::AlreadyRunning);
     }
@@ -558,7 +691,14 @@ pub async fn run(foreground: bool, enable_tray: bool) -> Result<(), DaemonError>
     let config = Config::load()?;
 
     if !foreground {
-        warn!("Background mode not yet implemented, running in foreground");
+        #[cfg(unix)]
+        {
+            daemonize_process()?;
+        }
+        #[cfg(not(unix))]
+        {
+            warn!("Background mode not supported on this platform, running in foreground");
+        }
     }
 
     write_pid()?;
@@ -571,6 +711,111 @@ pub async fn run(foreground: bool, enable_tray: bool) -> Result<(), DaemonError>
     result
 }
 
+/// Perform Unix daemonization using the daemonize crate
+#[cfg(unix)]
+fn daemonize_process() -> Result<(), DaemonError> {
+    use std::fs::File;
+
+    // Get log directory for stdout/stderr redirection
+    let log_dir = Config::data_dir().map_err(|e| DaemonError::DaemonizeFailed(e.to_string()))?;
+    let _ = std::fs::create_dir_all(&log_dir);
+
+    // Create stdout/stderr files for daemon output
+    let stdout_path = log_dir.join("daemon.out");
+    let stderr_path = log_dir.join("daemon.err");
+
+    let stdout = File::create(&stdout_path)
+        .map_err(|e| DaemonError::DaemonizeFailed(format!("Cannot create stdout file: {}", e)))?;
+    let stderr = File::create(&stderr_path)
+        .map_err(|e| DaemonError::DaemonizeFailed(format!("Cannot create stderr file: {}", e)))?;
+
+    // Print before forking so user sees the message
+    println!("Daemonizing OpenHush (logs: {:?})...", log_dir);
+
+    // Note: We don't use daemonize's pid_file feature because we manage it ourselves
+    // with atomic creation and proper cleanup
+    let daemonize = Daemonize::new()
+        .working_directory("/")
+        .stdout(stdout)
+        .stderr(stderr);
+
+    daemonize
+        .start()
+        .map_err(|e| DaemonError::DaemonizeFailed(format!("Fork failed: {}", e)))?;
+
+    // At this point, the parent has exited and we're in the child process
+    // The user will see "Daemonizing..." then their shell prompt returns
+
+    // If we get here, we're in the child process
+    info!("Daemonized successfully (PID: {})", std::process::id());
+
+    Ok(())
+}
+
+/// Check for stale PID file and clean up if the process is no longer running
+fn check_and_cleanup_stale_pid() -> Result<(), DaemonError> {
+    let path = match pid_file() {
+        Ok(p) => p,
+        Err(_) => return Ok(()), // No PID file path available, nothing to clean up
+    };
+
+    if !path.exists() {
+        return Ok(());
+    }
+
+    let pid_str = match std::fs::read_to_string(&path) {
+        Ok(s) => s,
+        Err(_) => return Ok(()), // Can't read, probably doesn't exist
+    };
+
+    let pid: i32 = match pid_str.trim().parse() {
+        Ok(p) => p,
+        Err(_) => {
+            // Invalid PID file content, remove it
+            warn!("Removing invalid PID file");
+            let _ = std::fs::remove_file(&path);
+            return Ok(());
+        }
+    };
+
+    // Check if process is actually running
+    #[cfg(unix)]
+    {
+        // SAFETY: kill(pid, 0) is safe - only checks if process exists
+        let result = unsafe { libc::kill(pid, 0) };
+        if result != 0 {
+            // Process not running, this is a stale PID file
+            warn!(
+                "Removing stale PID file (process {} no longer running)",
+                pid
+            );
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+
+    Ok(())
+}
+
+/// Verify that a PID belongs to an openhush process
+#[cfg(target_os = "linux")]
+fn verify_openhush_process(pid: i32) -> bool {
+    // Check /proc/<pid>/exe to verify it's openhush
+    let exe_path = format!("/proc/{}/exe", pid);
+    if let Ok(target) = std::fs::read_link(&exe_path) {
+        if let Some(name) = target.file_name() {
+            return name == "openhush";
+        }
+    }
+    false
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+fn verify_openhush_process(_pid: i32) -> bool {
+    // On non-Linux Unix, we can't easily verify the process name
+    // Fall back to trusting the PID file
+    true
+}
+
 /// Stop the daemon
 pub async fn stop() -> Result<(), DaemonError> {
     if !is_running() {
@@ -580,8 +825,27 @@ pub async fn stop() -> Result<(), DaemonError> {
     let path = pid_file()?;
     if let Ok(pid_str) = std::fs::read_to_string(&path) {
         if let Ok(pid) = pid_str.trim().parse::<i32>() {
+            // Validate PID is in reasonable range
+            if pid <= 0 {
+                warn!("Invalid PID {} in PID file, removing", pid);
+                let _ = std::fs::remove_file(&path);
+                return Err(DaemonError::NotRunning);
+            }
+
             #[cfg(unix)]
             {
+                // Verify the process is actually openhush before sending signal
+                if !verify_openhush_process(pid) {
+                    warn!(
+                        "PID {} is not an openhush process, removing stale PID file",
+                        pid
+                    );
+                    let _ = std::fs::remove_file(&path);
+                    return Err(DaemonError::NotRunning);
+                }
+
+                // SAFETY: kill(pid, SIGTERM) sends a termination signal to the process.
+                // The pid is validated as i32 and verified to be an openhush process.
                 unsafe {
                     libc::kill(pid, libc::SIGTERM);
                 }

@@ -163,17 +163,19 @@ impl TranscriptionWorker {
 /// * `job_rx` - Channel to receive transcription jobs
 /// * `result_tx` - Channel to send completed results
 /// * `audio_config` - Audio preprocessing configuration
+///
+/// # Errors
+/// Returns an error if the thread cannot be spawned (rare, usually resource exhaustion).
 pub fn spawn_worker(
     engine: WhisperEngine,
     job_rx: mpsc::Receiver<TranscriptionJob>,
     result_tx: mpsc::Sender<TranscriptionResult>,
     audio_config: AudioConfig,
-) -> std::thread::JoinHandle<()> {
+) -> std::io::Result<std::thread::JoinHandle<()>> {
     std::thread::Builder::new()
         .name("transcription-worker".to_string())
         .spawn(move || {
             let worker = TranscriptionWorker::new(engine, job_rx, result_tx, audio_config);
             worker.run();
         })
-        .expect("Failed to spawn transcription worker thread")
 }

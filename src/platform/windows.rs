@@ -17,8 +17,12 @@ impl WindowsPlatform {
 }
 
 impl Default for WindowsPlatform {
+    /// Creates a WindowsPlatform with default settings.
+    ///
+    /// This cannot panic as `WindowsPlatform::new()` always succeeds.
     fn default() -> Self {
-        Self::new().expect("Failed to create WindowsPlatform")
+        // WindowsPlatform::new() is infallible (returns empty struct)
+        Self::new().expect("WindowsPlatform::new is infallible")
     }
 }
 
