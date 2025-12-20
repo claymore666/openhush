@@ -7,7 +7,8 @@
 //! 4. Queues recordings for async transcription
 //! 5. Outputs text to clipboard and/or pastes at cursor (in order)
 
-use crate::config::Config;
+use crate::config::{Config, CorrectionConfig, VocabularyConfig};
+use crate::vad::VadConfig;
 use crate::correction::TextCorrector;
 use crate::engine::{WhisperEngine, WhisperError};
 #[cfg(target_os = "linux")]
@@ -15,7 +16,7 @@ use crate::gui;
 use crate::input::{AudioMark, AudioRecorder, AudioRecorderError, HotkeyEvent, HotkeyListener};
 use crate::output::{OutputError, OutputHandler};
 use crate::platform::{CurrentPlatform, Platform};
-use crate::queue::{worker::spawn_worker, TranscriptionJob, TranscriptionTracker};
+use crate::queue::{worker::spawn_worker, TranscriptionJob, TranscriptionResult, TranscriptionTracker};
 #[cfg(target_os = "linux")]
 use crate::tray::{TrayEvent, TrayManager};
 use crate::vad::{silero::SileroVad, VadEngine, VadError, VadState};
@@ -35,6 +36,166 @@ use daemonize::Daemonize;
 
 /// Channel buffer size for job and result queues
 const CHANNEL_BUFFER_SIZE: usize = 32;
+
+/// VAD processing interval (32ms = 512 samples at 16kHz, matches Silero VAD chunk size)
+const VAD_PROCESS_INTERVAL_MS: u64 = 32;
+
+// ============================================================================
+// Initialization Functions
+// ============================================================================
+
+/// Initialize Silero VAD if enabled or required for continuous mode.
+fn init_vad(
+    vad_config: &VadConfig,
+    is_continuous_mode: bool,
+) -> Result<(Option<Box<dyn VadEngine>>, Option<VadState>), DaemonError> {
+    if !vad_config.enabled && !is_continuous_mode {
+        return Ok((None, None));
+    }
+
+    match SileroVad::new(vad_config) {
+        Ok(vad) => {
+            info!(
+                "Silero VAD initialized (threshold: {:.2}, min_silence: {}ms, min_speech: {}ms)",
+                vad_config.threshold, vad_config.min_silence_ms, vad_config.min_speech_ms
+            );
+            let state = VadState::new(vad_config.clone(), 16000);
+            Ok((Some(Box::new(vad) as Box<dyn VadEngine>), Some(state)))
+        }
+        Err(e) => {
+            if is_continuous_mode {
+                Err(DaemonError::Vad(e))
+            } else {
+                warn!("VAD initialization failed: {}. Continuing without VAD.", e);
+                Ok((None, None))
+            }
+        }
+    }
+}
+
+/// Initialize vocabulary manager if enabled.
+async fn init_vocabulary(
+    config: &VocabularyConfig,
+) -> Option<Arc<VocabularyManager>> {
+    if !config.enabled {
+        return None;
+    }
+
+    let vocab_path = config
+        .path
+        .as_ref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| VocabularyManager::default_path().unwrap_or_default());
+
+    let manager = Arc::new(VocabularyManager::new(vocab_path.clone()));
+    match manager.load().await {
+        Ok(true) => {
+            info!(
+                "Vocabulary loaded ({} rules) from: {}",
+                manager.rule_count().await,
+                vocab_path.display()
+            );
+        }
+        Ok(false) => {
+            info!(
+                "Vocabulary file not found: {} (will be created on first use)",
+                vocab_path.display()
+            );
+        }
+        Err(e) => {
+            warn!(
+                "Failed to load vocabulary: {}. Continuing without vocabulary.",
+                e
+            );
+        }
+    }
+    Some(manager)
+}
+
+/// Initialize text corrector if enabled.
+async fn init_corrector(config: &CorrectionConfig) -> Option<Arc<TextCorrector>> {
+    if !config.enabled {
+        return None;
+    }
+
+    let corrector = Arc::new(TextCorrector::new(config.clone()));
+
+    if corrector.is_available().await {
+        info!(
+            "LLM correction enabled (model: {}, filler removal: {:?})",
+            config.ollama_model,
+            if config.remove_fillers {
+                Some(config.filler_mode)
+            } else {
+                None
+            }
+        );
+        Some(corrector)
+    } else {
+        warn!(
+            "Ollama not available at {}. Continuing without LLM correction.",
+            config.ollama_url
+        );
+        None
+    }
+}
+
+// ============================================================================
+// Output Processing
+// ============================================================================
+
+/// Process and output a transcription result.
+///
+/// Applies vocabulary replacements, LLM correction, and outputs the text.
+/// Returns the processed text for logging purposes.
+async fn process_and_output(
+    result: TranscriptionResult,
+    chunk_separator: &str,
+    vocabulary_manager: &Option<Arc<VocabularyManager>>,
+    text_corrector: &Option<Arc<TextCorrector>>,
+    output_handler: &OutputHandler,
+) {
+    if result.text.is_empty() {
+        debug!(
+            "Empty transcription result (seq {}.{})",
+            result.sequence_id, result.chunk_id
+        );
+        return;
+    }
+
+    // Add separator before chunks after the first
+    let mut text = if result.chunk_id > 0 {
+        format!("{}{}", chunk_separator, result.text)
+    } else {
+        result.text
+    };
+
+    // Apply vocabulary replacements
+    if let Some(ref vocab) = vocabulary_manager {
+        text = vocab.apply(&text).await;
+    }
+
+    // Apply LLM correction (includes filler removal)
+    if let Some(ref corrector) = text_corrector {
+        match corrector.correct(&text).await {
+            Ok(corrected) => text = corrected,
+            Err(e) => warn!("LLM correction failed: {}", e),
+        }
+    }
+
+    info!(
+        "📝 Output (seq {}.{}, {} chars)",
+        result.sequence_id, result.chunk_id, text.len()
+    );
+
+    if let Err(e) = output_handler.output(&text) {
+        error!("Output failed: {}", e);
+    }
+}
+
+// ============================================================================
+// Error Types
+// ============================================================================
 
 #[derive(Error, Debug)]
 pub enum DaemonError {
@@ -253,69 +414,10 @@ impl Daemon {
         // Initialize VAD if enabled (for continuous dictation mode)
         let vad_config = self.config.vad.clone();
         let is_continuous_mode = self.config.hotkey.mode == "continuous";
-        let mut vad_engine: Option<Box<dyn VadEngine>> = if vad_config.enabled || is_continuous_mode {
-            match SileroVad::new(&vad_config) {
-                Ok(vad) => {
-                    info!(
-                        "Silero VAD initialized (threshold: {:.2}, min_silence: {}ms, min_speech: {}ms)",
-                        vad_config.threshold,
-                        vad_config.min_silence_ms,
-                        vad_config.min_speech_ms
-                    );
-                    Some(Box::new(vad))
-                }
-                Err(e) => {
-                    if is_continuous_mode {
-                        return Err(DaemonError::Vad(e));
-                    } else {
-                        warn!("VAD initialization failed: {}. Continuing without VAD.", e);
-                        None
-                    }
-                }
-            }
-        } else {
-            None
-        };
-        let mut vad_state: Option<VadState> = if vad_engine.is_some() {
-            Some(VadState::new(vad_config.clone(), 16000))
-        } else {
-            None
-        };
+        let (mut vad_engine, mut vad_state) = init_vad(&vad_config, is_continuous_mode)?;
 
         // Initialize vocabulary manager if enabled
-        let vocabulary_manager: Option<Arc<VocabularyManager>> =
-            if self.config.vocabulary.enabled {
-                let vocab_path = self
-                    .config
-                    .vocabulary
-                    .path
-                    .as_ref()
-                    .map(PathBuf::from)
-                    .unwrap_or_else(|| VocabularyManager::default_path().unwrap_or_default());
-
-                let manager = Arc::new(VocabularyManager::new(vocab_path.clone()));
-                match manager.load().await {
-                    Ok(true) => {
-                        info!(
-                            "Vocabulary loaded ({} rules) from: {}",
-                            manager.rule_count().await,
-                            vocab_path.display()
-                        );
-                    }
-                    Ok(false) => {
-                        info!(
-                            "Vocabulary file not found: {} (will be created on first use)",
-                            vocab_path.display()
-                        );
-                    }
-                    Err(e) => {
-                        warn!("Failed to load vocabulary: {}. Continuing without vocabulary.", e);
-                    }
-                }
-                Some(manager)
-            } else {
-                None
-            };
+        let vocabulary_manager = init_vocabulary(&self.config.vocabulary).await;
 
         // Vocabulary reload timer (check for file changes periodically)
         let vocab_reload_interval = if self.config.vocabulary.enabled
@@ -334,30 +436,7 @@ impl Daemon {
         });
 
         // Initialize text corrector if enabled
-        let text_corrector: Option<Arc<TextCorrector>> = if self.config.correction.enabled {
-            let corrector = Arc::new(TextCorrector::new(self.config.correction.clone()));
-            // Check if Ollama is available
-            if corrector.is_available().await {
-                info!(
-                    "LLM correction enabled (model: {}, filler removal: {:?})",
-                    self.config.correction.ollama_model,
-                    if self.config.correction.remove_fillers {
-                        Some(self.config.correction.filler_mode)
-                    } else {
-                        None
-                    }
-                );
-                Some(corrector)
-            } else {
-                warn!(
-                    "Ollama not available at {}. Continuing without LLM correction.",
-                    self.config.correction.ollama_url
-                );
-                None
-            }
-        } else {
-            None
-        };
+        let text_corrector = init_corrector(&self.config.correction).await;
 
         // Create transcription job and result channels
         let (job_tx, job_rx) = mpsc::channel(CHANNEL_BUFFER_SIZE);
@@ -402,8 +481,7 @@ impl Daemon {
         // Chunk timer (resets on each recording start)
         let mut chunk_timer: Option<tokio::time::Interval> = None;
 
-        // VAD processing interval (32ms = 512 samples at 16kHz, matches Silero VAD chunk size)
-        const VAD_PROCESS_INTERVAL_MS: u64 = 32;
+        // VAD timer (for continuous dictation mode)
         let mut vad_timer: Option<tokio::time::Interval> = None;
 
         if is_continuous_mode {
@@ -621,37 +699,13 @@ impl Daemon {
 
                                 // Flush any buffered results now that hotkey is released
                                 for ready in tracker.take_ready() {
-                                    if !ready.text.is_empty() {
-                                        // Add separator before chunks after the first
-                                        let mut text = if ready.chunk_id > 0 {
-                                            format!("{}{}", chunk_separator, ready.text)
-                                        } else {
-                                            ready.text
-                                        };
-
-                                        // Apply vocabulary replacements
-                                        if let Some(ref vocab) = vocabulary_manager {
-                                            text = vocab.apply(&text).await;
-                                        }
-
-                                        // Apply LLM correction (includes filler removal)
-                                        if let Some(ref corrector) = text_corrector {
-                                            match corrector.correct(&text).await {
-                                                Ok(corrected) => text = corrected,
-                                                Err(e) => warn!("LLM correction failed: {}", e),
-                                            }
-                                        }
-
-                                        info!(
-                                            "📝 Output (seq {}.{}, {} chars)",
-                                            ready.sequence_id,
-                                            ready.chunk_id,
-                                            text.len()
-                                        );
-                                        if let Err(e) = output_handler.output(&text) {
-                                            error!("Output failed: {}", e);
-                                        }
-                                    }
+                                    process_and_output(
+                                        ready,
+                                        &chunk_separator,
+                                        &vocabulary_manager,
+                                        &text_corrector,
+                                        &output_handler,
+                                    ).await;
                                 }
                             }
                         }
@@ -674,43 +728,13 @@ impl Daemon {
                     // This prevents AltGr/modifier key from affecting typed output
                     if matches!(self.state, DaemonState::Idle) {
                         for ready in tracker.take_ready() {
-                            if !ready.text.is_empty() {
-                                // Add separator before chunks after the first
-                                let mut text = if ready.chunk_id > 0 {
-                                    format!("{}{}", chunk_separator, ready.text)
-                                } else {
-                                    ready.text
-                                };
-
-                                // Apply vocabulary replacements
-                                if let Some(ref vocab) = vocabulary_manager {
-                                    text = vocab.apply(&text).await;
-                                }
-
-                                // Apply LLM correction (includes filler removal)
-                                if let Some(ref corrector) = text_corrector {
-                                    match corrector.correct(&text).await {
-                                        Ok(corrected) => text = corrected,
-                                        Err(e) => warn!("LLM correction failed: {}", e),
-                                    }
-                                }
-
-                                info!(
-                                    "📝 Output (seq {}.{}, {} chars)",
-                                    ready.sequence_id,
-                                    ready.chunk_id,
-                                    text.len()
-                                );
-                                if let Err(e) = output_handler.output(&text) {
-                                    error!("Output failed: {}", e);
-                                }
-                            } else {
-                                debug!(
-                                    "Empty transcription result (seq {}.{})",
-                                    ready.sequence_id,
-                                    ready.chunk_id
-                                );
-                            }
+                            process_and_output(
+                                ready,
+                                &chunk_separator,
+                                &vocabulary_manager,
+                                &text_corrector,
+                                &output_handler,
+                            ).await;
                         }
                     } else {
                         debug!("Buffering result while recording (will output on release)");
