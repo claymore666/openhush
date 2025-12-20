@@ -18,7 +18,9 @@ use crate::queue::{worker::spawn_worker, TranscriptionJob, TranscriptionTracker}
 #[cfg(target_os = "linux")]
 use crate::tray::{TrayEvent, TrayManager};
 use crate::vad::{silero::SileroVad, VadEngine, VadError, VadState};
+use crate::vocabulary::{VocabularyError, VocabularyManager};
 use std::path::PathBuf;
+use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
@@ -61,6 +63,9 @@ pub enum DaemonError {
 
     #[error("VAD error: {0}")]
     Vad(#[from] VadError),
+
+    #[error("Vocabulary error: {0}")]
+    Vocabulary(#[from] VocabularyError),
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
@@ -275,6 +280,57 @@ impl Daemon {
         } else {
             None
         };
+
+        // Initialize vocabulary manager if enabled
+        let vocabulary_manager: Option<Arc<VocabularyManager>> =
+            if self.config.vocabulary.enabled {
+                let vocab_path = self
+                    .config
+                    .vocabulary
+                    .path
+                    .as_ref()
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| VocabularyManager::default_path().unwrap_or_default());
+
+                let manager = Arc::new(VocabularyManager::new(vocab_path.clone()));
+                match manager.load().await {
+                    Ok(true) => {
+                        info!(
+                            "Vocabulary loaded ({} rules) from: {}",
+                            manager.rule_count().await,
+                            vocab_path.display()
+                        );
+                    }
+                    Ok(false) => {
+                        info!(
+                            "Vocabulary file not found: {} (will be created on first use)",
+                            vocab_path.display()
+                        );
+                    }
+                    Err(e) => {
+                        warn!("Failed to load vocabulary: {}. Continuing without vocabulary.", e);
+                    }
+                }
+                Some(manager)
+            } else {
+                None
+            };
+
+        // Vocabulary reload timer (check for file changes periodically)
+        let vocab_reload_interval = if self.config.vocabulary.enabled
+            && self.config.vocabulary.reload_interval_secs > 0
+        {
+            Some(tokio::time::Duration::from_secs(
+                self.config.vocabulary.reload_interval_secs as u64,
+            ))
+        } else {
+            None
+        };
+        let mut vocab_reload_timer: Option<tokio::time::Interval> = vocab_reload_interval.map(|d| {
+            let mut timer = tokio::time::interval(d);
+            timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            timer
+        });
 
         // Create transcription job and result channels
         let (job_tx, job_rx) = mpsc::channel(CHANNEL_BUFFER_SIZE);
@@ -540,11 +596,17 @@ impl Daemon {
                                 for ready in tracker.take_ready() {
                                     if !ready.text.is_empty() {
                                         // Add separator before chunks after the first
-                                        let text = if ready.chunk_id > 0 {
+                                        let mut text = if ready.chunk_id > 0 {
                                             format!("{}{}", chunk_separator, ready.text)
                                         } else {
                                             ready.text
                                         };
+
+                                        // Apply vocabulary replacements
+                                        if let Some(ref vocab) = vocabulary_manager {
+                                            text = vocab.apply(&text).await;
+                                        }
+
                                         info!(
                                             "📝 Output (seq {}.{}, {} chars)",
                                             ready.sequence_id,
@@ -579,11 +641,17 @@ impl Daemon {
                         for ready in tracker.take_ready() {
                             if !ready.text.is_empty() {
                                 // Add separator before chunks after the first
-                                let text = if ready.chunk_id > 0 {
+                                let mut text = if ready.chunk_id > 0 {
                                     format!("{}{}", chunk_separator, ready.text)
                                 } else {
                                     ready.text
                                 };
+
+                                // Apply vocabulary replacements
+                                if let Some(ref vocab) = vocabulary_manager {
+                                    text = vocab.apply(&text).await;
+                                }
+
                                 info!(
                                     "📝 Output (seq {}.{}, {} chars)",
                                     ready.sequence_id,
@@ -763,6 +831,30 @@ impl Daemon {
                             }
                         }
                         *last_vad_pos = current_pos;
+                    }
+                }
+
+                // Handle vocabulary reload timer
+                _ = async {
+                    if let Some(timer) = &mut vocab_reload_timer {
+                        timer.tick().await;
+                    } else {
+                        std::future::pending::<()>().await;
+                    }
+                } => {
+                    if let Some(ref vocab) = vocabulary_manager {
+                        match vocab.check_reload().await {
+                            Ok(true) => {
+                                info!(
+                                    "Vocabulary reloaded ({} rules)",
+                                    vocab.rule_count().await
+                                );
+                            }
+                            Ok(false) => {} // No changes
+                            Err(e) => {
+                                warn!("Failed to reload vocabulary: {}", e);
+                            }
+                        }
                     }
                 }
 

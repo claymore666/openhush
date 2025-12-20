@@ -16,6 +16,7 @@ mod queue;
 #[cfg(target_os = "linux")]
 mod tray;
 mod vad;
+mod vocabulary;
 
 #[derive(Parser)]
 #[command(name = "openhush")]

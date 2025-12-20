@@ -53,6 +53,39 @@ pub struct Config {
     /// Voice Activity Detection settings for continuous dictation
     #[serde(default)]
     pub vad: VadConfig,
+
+    /// Vocabulary replacement settings
+    #[serde(default)]
+    pub vocabulary: VocabularyConfig,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct VocabularyConfig {
+    /// Enable vocabulary replacement
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Path to vocabulary file (default: ~/.config/openhush/vocabulary.toml)
+    #[serde(default)]
+    pub path: Option<String>,
+
+    /// Check for file changes every N seconds (0 = disabled)
+    #[serde(default = "default_vocabulary_reload_interval")]
+    pub reload_interval_secs: u32,
+}
+
+impl Default for VocabularyConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false, // Opt-in feature
+            path: None,     // Use default path
+            reload_interval_secs: default_vocabulary_reload_interval(),
+        }
+    }
+}
+
+fn default_vocabulary_reload_interval() -> u32 {
+    5 // Check for changes every 5 seconds
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
