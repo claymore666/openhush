@@ -18,7 +18,7 @@ cuda = ["whisper-rs/cuda"]
 whisper-rs = "0.13"
 
 # Audio capture
-cpal = "0.15"
+cpal = "0.17"
 
 # Global hotkeys
 rdev = "0.5"
