@@ -27,7 +27,7 @@ rdev = "0.5"
 arboard = "3.4"
 
 # Simulated typing (X11/macOS/Windows)
-enigo = "0.2"
+enigo = "0.6"
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
