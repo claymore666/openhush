@@ -1,0 +1,26 @@
+//! OpenHush library exports for testing and fuzzing.
+//!
+//! This module re-exports internal types for use by fuzz targets
+//! and integration tests.
+
+pub mod config;
+pub mod correction;
+pub mod daemon;
+pub mod engine;
+#[cfg(target_os = "linux")]
+pub mod gui;
+pub mod input;
+pub mod output;
+pub mod panic_handler;
+pub mod platform;
+pub mod queue;
+#[cfg(target_os = "linux")]
+pub mod tray;
+pub mod vad;
+pub mod vocabulary;
+
+// Re-export commonly used types for convenience
+pub use config::Config;
+pub use engine::validation::validate_audio;
+pub use input::audio::AudioBuffer;
+pub use input::ring_buffer::AudioRingBuffer;

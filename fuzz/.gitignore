@@ -1,0 +1,7 @@
+# Fuzz artifacts
+artifacts/
+coverage/
+target/
+
+# Corpus can get large, optionally exclude
+# corpus/
