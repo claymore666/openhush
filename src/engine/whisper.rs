@@ -384,19 +384,135 @@ pub fn is_model_downloaded(model: WhisperModel) -> bool {
 /// List downloaded models
 #[allow(dead_code)]
 pub fn list_downloaded_models() -> Vec<WhisperModel> {
-    let all_models = [
+    all_models()
+        .into_iter()
+        .filter(|m| is_model_downloaded(*m))
+        .collect()
+}
+
+/// Get all available models
+pub fn all_models() -> Vec<WhisperModel> {
+    vec![
         WhisperModel::Tiny,
         WhisperModel::Base,
         WhisperModel::Small,
         WhisperModel::Medium,
         WhisperModel::LargeV3,
-    ];
+    ]
+}
 
-    all_models
-        .iter()
-        .filter(|m| is_model_downloaded(**m))
-        .copied()
-        .collect()
+/// Get model file size in bytes (approximate)
+pub fn model_size_bytes(model: WhisperModel) -> u64 {
+    match model {
+        WhisperModel::Tiny => 75_000_000,       // ~75MB
+        WhisperModel::Base => 142_000_000,      // ~142MB
+        WhisperModel::Small => 466_000_000,     // ~466MB
+        WhisperModel::Medium => 1_500_000_000,  // ~1.5GB
+        WhisperModel::LargeV3 => 3_000_000_000, // ~3GB
+    }
+}
+
+/// Format bytes as human-readable size
+pub fn format_size(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = KB * 1024;
+    const GB: u64 = MB * 1024;
+
+    if bytes >= GB {
+        format!("{:.1} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.0} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.0} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{} B", bytes)
+    }
+}
+
+/// Download a model from Hugging Face with progress callback
+pub async fn download_model<F>(
+    model: WhisperModel,
+    mut progress_callback: F,
+) -> Result<PathBuf, WhisperError>
+where
+    F: FnMut(u64, u64), // (downloaded, total)
+{
+    let dir = models_dir()?;
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| WhisperError::LoadFailed(format!("Cannot create models dir: {}", e)))?;
+
+    let dest_path = dir.join(model.filename());
+    let temp_path = dir.join(format!("{}.tmp", model.filename()));
+
+    // Check if already downloaded
+    if dest_path.exists() {
+        return Err(WhisperError::LoadFailed(format!(
+            "Model {} already exists at {}",
+            model.filename(),
+            dest_path.display()
+        )));
+    }
+
+    let url = model.download_url();
+    let client = reqwest::Client::new();
+
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| WhisperError::LoadFailed(format!("Download failed: {}", e)))?;
+
+    if !response.status().is_success() {
+        return Err(WhisperError::LoadFailed(format!(
+            "Download failed with status: {}",
+            response.status()
+        )));
+    }
+
+    let total_size = response.content_length().unwrap_or(model_size_bytes(model));
+
+    // Stream to temp file
+    let mut file = std::fs::File::create(&temp_path)
+        .map_err(|e| WhisperError::LoadFailed(format!("Cannot create temp file: {}", e)))?;
+
+    let mut downloaded: u64 = 0;
+    let mut stream = response.bytes_stream();
+
+    use futures_util::StreamExt;
+    use std::io::Write;
+
+    while let Some(chunk) = stream.next().await {
+        let chunk =
+            chunk.map_err(|e| WhisperError::LoadFailed(format!("Download error: {}", e)))?;
+        file.write_all(&chunk)
+            .map_err(|e| WhisperError::LoadFailed(format!("Write error: {}", e)))?;
+        downloaded += chunk.len() as u64;
+        progress_callback(downloaded, total_size);
+    }
+
+    // Rename temp to final
+    std::fs::rename(&temp_path, &dest_path)
+        .map_err(|e| WhisperError::LoadFailed(format!("Cannot rename temp file: {}", e)))?;
+
+    Ok(dest_path)
+}
+
+/// Remove a downloaded model
+pub fn remove_model(model: WhisperModel) -> Result<(), WhisperError> {
+    let dir = models_dir()?;
+    let path = dir.join(model.filename());
+
+    if !path.exists() {
+        return Err(WhisperError::LoadFailed(format!(
+            "Model {} not found",
+            model.filename()
+        )));
+    }
+
+    std::fs::remove_file(&path)
+        .map_err(|e| WhisperError::LoadFailed(format!("Cannot remove model: {}", e)))?;
+
+    Ok(())
 }
 
 /// Convert whisper language ID to ISO 639-1 language code.

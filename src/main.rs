@@ -251,23 +251,86 @@ async fn main() -> anyhow::Result<()> {
 
         Commands::Model { action } => match action {
             ModelAction::Download { name } => {
-                info!("Downloading model: {}", name);
-                // TODO: Implement model download
-                println!("Model download not yet implemented");
+                use engine::whisper::{
+                    download_model, format_size, model_size_bytes, WhisperModel,
+                };
+                use std::io::Write;
+
+                let model = WhisperModel::from_str(&name).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Unknown model '{}'. Available: tiny, base, small, medium, large-v3",
+                        name
+                    )
+                })?;
+
+                println!(
+                    "Downloading {} ({})...",
+                    model.filename(),
+                    format_size(model_size_bytes(model))
+                );
+
+                let mut last_percent = 0;
+                let path = download_model(model, |downloaded, total| {
+                    let percent = ((downloaded as f64 / total as f64) * 100.0) as u32;
+                    if percent > last_percent {
+                        last_percent = percent;
+                        print!(
+                            "\r  Progress: {}% ({} / {})",
+                            percent,
+                            format_size(downloaded),
+                            format_size(total)
+                        );
+                        let _ = std::io::stdout().flush();
+                    }
+                })
+                .await?;
+
+                println!("\nDownloaded to: {}", path.display());
             }
             ModelAction::List => {
-                // TODO: Implement model listing
-                println!("Available models:");
-                println!("  tiny      - 75MB,  fastest, lowest accuracy");
-                println!("  base      - 142MB, fast");
-                println!("  small     - 466MB, balanced");
-                println!("  medium    - 1.5GB, good accuracy");
-                println!("  large-v3  - 3GB,   best accuracy");
+                use engine::whisper::{
+                    all_models, format_size, is_model_downloaded, model_size_bytes,
+                };
+
+                println!("Available Whisper models:\n");
+                println!(
+                    "  {:<12} {:<10} {:<10} Description",
+                    "Model", "Size", "Status"
+                );
+                println!("  {}", "-".repeat(60));
+
+                for model in all_models() {
+                    let name = format!("{:?}", model).to_lowercase();
+                    let size = format_size(model_size_bytes(model));
+                    let status = if is_model_downloaded(model) {
+                        "✓ local"
+                    } else {
+                        "remote"
+                    };
+                    let desc = match model {
+                        engine::whisper::WhisperModel::Tiny => "Fastest, lowest accuracy",
+                        engine::whisper::WhisperModel::Base => "Fast, good for simple audio",
+                        engine::whisper::WhisperModel::Small => "Balanced speed/accuracy",
+                        engine::whisper::WhisperModel::Medium => "Good accuracy, slower",
+                        engine::whisper::WhisperModel::LargeV3 => "Best accuracy, slowest",
+                    };
+                    println!("  {:<12} {:<10} {:<10} {}", name, size, status, desc);
+                }
+
+                println!("\nUse 'openhush model download <name>' to download a model.");
             }
             ModelAction::Remove { name } => {
-                info!("Removing model: {}", name);
-                // TODO: Implement model removal
-                println!("Model removal not yet implemented");
+                use engine::whisper::{remove_model, WhisperModel};
+
+                let model = WhisperModel::from_str(&name).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Unknown model '{}'. Available: tiny, base, small, medium, large-v3",
+                        name
+                    )
+                })?;
+
+                remove_model(model)?;
+                println!("Removed model: {}", model.filename());
             }
         },
 
