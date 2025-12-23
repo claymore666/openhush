@@ -293,7 +293,7 @@ impl Daemon {
     /// Get the path to the Whisper model file
     fn model_path(&self) -> Result<PathBuf, DaemonError> {
         let data_dir = Config::data_dir()?;
-        let model_file = format!("ggml-{}.bin", self.config.transcription.model);
+        let model_file = format!("ggml-{}.bin", self.config.transcription.effective_model());
         let path = data_dir.join("models").join(&model_file);
         Ok(path)
     }
@@ -305,7 +305,11 @@ impl Daemon {
             self.platform.display_server()
         );
         info!("Hotkey: {}", self.config.hotkey.key);
-        info!("Model: {}", self.config.transcription.model);
+        info!(
+            "Model: {} (preset: {:?})",
+            self.config.transcription.effective_model(),
+            self.config.transcription.preset
+        );
 
         // Initialize system tray if enabled (Linux only for now)
         #[cfg(target_os = "linux")]
@@ -334,15 +338,16 @@ impl Daemon {
 
         // Check if model exists
         let model_path = self.model_path()?;
+        let effective_model = self.config.transcription.effective_model();
         if !model_path.exists() {
             error!(
                 "Model not found at: {}. Run 'openhush model download {}'",
                 model_path.display(),
-                self.config.transcription.model
+                effective_model
             );
             return Err(DaemonError::Whisper(WhisperError::ModelNotFound(
                 model_path,
-                self.config.transcription.model.clone(),
+                effective_model.to_string(),
             )));
         }
 

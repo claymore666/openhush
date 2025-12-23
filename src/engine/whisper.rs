@@ -168,8 +168,8 @@ impl WhisperEngine {
     pub fn from_config(config: &Config) -> Result<Self, WhisperError> {
         let data_dir = Config::data_dir().map_err(|e| WhisperError::LoadFailed(e.to_string()))?;
 
-        let model =
-            WhisperModel::from_str(&config.transcription.model).unwrap_or(WhisperModel::Base);
+        let model = WhisperModel::from_str(config.transcription.effective_model())
+            .unwrap_or(WhisperModel::Base);
 
         let model_path = data_dir.join("models").join(model.filename());
         let use_gpu = config.transcription.device.to_lowercase() != "cpu";

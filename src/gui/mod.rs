@@ -113,28 +113,68 @@ impl PreferencesApp {
     }
 
     fn show_transcription_tab(&mut self, ui: &mut egui::Ui) {
+        use crate::config::TranscriptionPreset;
+
         ui.heading("Transcription Settings");
         ui.add_space(10.0);
 
+        // Preset dropdown
         ui.horizontal(|ui| {
-            ui.label("Model:");
-            let models = ["tiny", "base", "small", "medium", "large-v3"];
-            egui::ComboBox::from_id_salt("model")
-                .selected_text(&self.config.transcription.model)
+            ui.label("Preset:");
+            let preset_text = match self.config.transcription.preset {
+                TranscriptionPreset::Instant => "Instant (small)",
+                TranscriptionPreset::Balanced => "Balanced (medium)",
+                TranscriptionPreset::Quality => "Quality (large-v3)",
+                TranscriptionPreset::Custom => "Custom",
+            };
+            egui::ComboBox::from_id_salt("preset")
+                .selected_text(preset_text)
                 .show_ui(ui, |ui| {
-                    for model in models {
+                    for (preset, label) in [
+                        (TranscriptionPreset::Instant, "Instant (small)"),
+                        (TranscriptionPreset::Balanced, "Balanced (medium)"),
+                        (TranscriptionPreset::Quality, "Quality (large-v3)"),
+                        (TranscriptionPreset::Custom, "Custom"),
+                    ] {
                         if ui
-                            .selectable_value(
-                                &mut self.config.transcription.model,
-                                model.to_string(),
-                                model,
-                            )
+                            .selectable_value(&mut self.config.transcription.preset, preset, label)
                             .changed()
                         {
                             self.unsaved_changes = true;
                         }
                     }
                 });
+        });
+
+        ui.add_space(5.0);
+
+        // Model dropdown (only enabled for Custom preset)
+        let is_custom = self.config.transcription.preset == TranscriptionPreset::Custom;
+        let effective_model = self.config.transcription.effective_model().to_string();
+        ui.horizontal(|ui| {
+            ui.label("Model:");
+            let models = ["tiny", "base", "small", "medium", "large-v3"];
+            ui.add_enabled_ui(is_custom, |ui| {
+                egui::ComboBox::from_id_salt("model")
+                    .selected_text(&effective_model)
+                    .show_ui(ui, |ui| {
+                        for model in models {
+                            if ui
+                                .selectable_value(
+                                    &mut self.config.transcription.model,
+                                    model.to_string(),
+                                    model,
+                                )
+                                .changed()
+                            {
+                                self.unsaved_changes = true;
+                            }
+                        }
+                    });
+            });
+            if !is_custom {
+                ui.label("(set by preset)");
+            }
         });
 
         ui.add_space(10.0);

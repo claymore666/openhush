@@ -122,9 +122,42 @@ pub struct HotkeyConfig {
     pub mode: String,
 }
 
+/// Transcription mode preset for speed vs quality tradeoff.
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TranscriptionPreset {
+    /// Fastest response for live dictation (tiny/small model, 30s buffer)
+    Instant,
+    /// Balanced speed and accuracy (small/medium model, 60s buffer)
+    #[default]
+    Balanced,
+    /// Best accuracy for important content (medium/large-v3 model, 120s buffer)
+    Quality,
+    /// Use explicit model/audio settings from config
+    Custom,
+}
+
+impl TranscriptionPreset {
+    /// Get the recommended model for this preset.
+    pub fn model(&self) -> &'static str {
+        match self {
+            Self::Instant => "small",
+            Self::Balanced => "medium",
+            Self::Quality => "large-v3",
+            Self::Custom => "base", // Fallback, custom uses explicit setting
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TranscriptionConfig {
+    /// Preset: instant, balanced, quality, or custom
+    /// When not custom, model and prebuffer are auto-configured.
+    #[serde(default)]
+    pub preset: TranscriptionPreset,
+
     /// Whisper model: tiny, base, small, medium, large-v3
+    /// Only used when preset = "custom"
     #[serde(default = "default_model")]
     pub model: String,
 
@@ -139,6 +172,17 @@ pub struct TranscriptionConfig {
     /// Translate to English (instead of transcribing in original language)
     #[serde(default)]
     pub translate: bool,
+}
+
+impl TranscriptionConfig {
+    /// Get the effective model based on preset.
+    pub fn effective_model(&self) -> &str {
+        if self.preset == TranscriptionPreset::Custom {
+            &self.model
+        } else {
+            self.preset.model()
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -509,6 +553,7 @@ impl Default for HotkeyConfig {
 impl Default for TranscriptionConfig {
     fn default() -> Self {
         Self {
+            preset: TranscriptionPreset::default(),
             model: default_model(),
             language: default_language(),
             device: default_device(),
