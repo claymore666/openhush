@@ -33,9 +33,6 @@ use tracing::{debug, error, info, warn};
 #[allow(clippy::single_component_path_imports)]
 use gtk;
 
-#[cfg(unix)]
-use daemonize::Daemonize;
-
 /// Channel buffer size for job and result queues
 const CHANNEL_BUFFER_SIZE: usize = 32;
 
@@ -1073,10 +1070,12 @@ pub async fn run(foreground: bool, enable_tray: bool) -> Result<(), DaemonError>
     result
 }
 
-/// Perform Unix daemonization using the daemonize crate
+/// Perform Unix daemonization using nix crate
 #[cfg(unix)]
 fn daemonize_process() -> Result<(), DaemonError> {
+    use nix::unistd::{chdir, dup2, fork, setsid, ForkResult};
     use std::fs::File;
+    use std::os::unix::io::AsRawFd;
 
     // Get log directory for stdout/stderr redirection
     let log_dir = Config::data_dir().map_err(|e| DaemonError::DaemonizeFailed(e.to_string()))?;
@@ -1092,29 +1091,63 @@ fn daemonize_process() -> Result<(), DaemonError> {
     let stdout_path = log_dir.join("daemon.out");
     let stderr_path = log_dir.join("daemon.err");
 
-    let stdout = File::create(&stdout_path)
+    let stdout_file = File::create(&stdout_path)
         .map_err(|e| DaemonError::DaemonizeFailed(format!("Cannot create stdout file: {}", e)))?;
-    let stderr = File::create(&stderr_path)
+    let stderr_file = File::create(&stderr_path)
         .map_err(|e| DaemonError::DaemonizeFailed(format!("Cannot create stderr file: {}", e)))?;
 
     // Print before forking so user sees the message
     println!("Daemonizing OpenHush (logs: {:?})...", log_dir);
 
-    // Note: We don't use daemonize's pid_file feature because we manage it ourselves
-    // with atomic creation and proper cleanup
-    let daemonize = Daemonize::new()
-        .working_directory("/")
-        .stdout(stdout)
-        .stderr(stderr);
+    // First fork: create child process
+    // SAFETY: fork() is safe when called before spawning threads.
+    // We're in the startup path before any threads are created.
+    match unsafe { fork() } {
+        Ok(ForkResult::Parent { .. }) => {
+            // Parent exits, child continues
+            std::process::exit(0);
+        }
+        Ok(ForkResult::Child) => {
+            // Continue in child
+        }
+        Err(e) => {
+            return Err(DaemonError::DaemonizeFailed(format!(
+                "First fork failed: {}",
+                e
+            )));
+        }
+    }
 
-    daemonize
-        .start()
-        .map_err(|e| DaemonError::DaemonizeFailed(format!("Fork failed: {}", e)))?;
+    // Create new session, become session leader
+    setsid().map_err(|e| DaemonError::DaemonizeFailed(format!("setsid failed: {}", e)))?;
 
-    // At this point, the parent has exited and we're in the child process
-    // The user will see "Daemonizing..." then their shell prompt returns
+    // Second fork: ensure we can never acquire a controlling terminal
+    // SAFETY: Same as above, we're still single-threaded at this point
+    match unsafe { fork() } {
+        Ok(ForkResult::Parent { .. }) => {
+            std::process::exit(0);
+        }
+        Ok(ForkResult::Child) => {
+            // Continue in grandchild
+        }
+        Err(e) => {
+            return Err(DaemonError::DaemonizeFailed(format!(
+                "Second fork failed: {}",
+                e
+            )));
+        }
+    }
 
-    // If we get here, we're in the child process
+    // Change working directory to root
+    chdir("/").map_err(|e| DaemonError::DaemonizeFailed(format!("chdir failed: {}", e)))?;
+
+    // Redirect stdout/stderr to log files
+    // Note: We don't redirect stdin as it's not needed for a daemon
+    dup2(stdout_file.as_raw_fd(), 1)
+        .map_err(|e| DaemonError::DaemonizeFailed(format!("dup2 stdout failed: {}", e)))?;
+    dup2(stderr_file.as_raw_fd(), 2)
+        .map_err(|e| DaemonError::DaemonizeFailed(format!("dup2 stderr failed: {}", e)))?;
+
     info!("Daemonized successfully (PID: {})", std::process::id());
 
     Ok(())
