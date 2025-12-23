@@ -14,8 +14,6 @@ ignore = [
     "RUSTSEC-2024-0415",
     # glib iterator unsoundness - upstream hasn't released fix compatible with gtk3
     "RUSTSEC-2024-0429",
-    # daemonize is unmaintained but works fine for our use case
-    "RUSTSEC-2025-0069",
 ]
 
 [licenses]
@@ -29,13 +27,13 @@ allow = [
     "ISC",
     "Zlib",
     "MPL-2.0",
-    "Unicode-DFS-2016",
     # Additional OSI-approved licenses from dependencies
-    "BSL-1.0",       # Boost Software License (clipboard-win, error-code)
-    "OFL-1.1",       # SIL Open Font License (epaint_default_fonts)
-    "Unicode-3.0",   # Unicode License v3 (icu_* crates)
-    "NCSA",          # UIUC/NCSA Open Source License (libfuzzer-sys via rav1e)
-    "Unlicense",     # The Unlicense (whisper-rs, whisper-rs-sys)
+    "BSL-1.0",               # Boost Software License (clipboard-win, error-code)
+    "OFL-1.1",               # SIL Open Font License (epaint_default_fonts)
+    "Unicode-3.0",           # Unicode License v3 (icu_* crates)
+    "NCSA",                  # UIUC/NCSA Open Source License (libfuzzer-sys via rav1e)
+    "Unlicense",             # The Unlicense (whisper-rs, whisper-rs-sys)
+    "CDLA-Permissive-2.0",   # Community Data License (webpki-root-certs)
 ]
 confidence-threshold = 0.8
 

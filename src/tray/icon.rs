@@ -2,6 +2,9 @@
 //!
 //! Creates a simple microphone icon for the system tray.
 
+// Allow dx * dx pattern - it's correct for Euclidean distance (dx² + dy²)
+#![allow(clippy::suspicious_operation_groupings)]
+
 use tray_icon::Icon;
 
 /// Create the tray icon

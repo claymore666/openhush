@@ -83,7 +83,7 @@ fn format_crash_report(info: &PanicHookInfo) -> String {
     let backtrace = std::backtrace::Backtrace::force_capture();
 
     format!(
-        r#"
+        r"
 ================================================================================
 OPENHUSH CRASH REPORT
 ================================================================================
@@ -100,7 +100,7 @@ If you're seeing this, OpenHush has crashed unexpectedly.
 Please report this issue at: https://github.com/claymore666/openhush/issues
 
 Include this crash report and any steps to reproduce the issue.
-"#,
+",
         timestamp, thread_name, thread_id, location, payload, backtrace,
     )
 }
