@@ -236,6 +236,9 @@ pub enum DaemonError {
     #[cfg(unix)]
     #[error("Daemonization failed: {0}")]
     DaemonizeFailed(String),
+
+    #[error("Transcription worker failed: channel closed")]
+    WorkerFailed,
 }
 
 /// Daemon state machine
@@ -687,9 +690,10 @@ impl Daemon {
                                             chunk_id: next_chunk_id,
                                             is_final: true,
                                         };
-                                        if job_tx.send(job).await.is_err() {
-                                            error!("Failed to submit final transcription job");
-                                        }
+                                        job_tx.send(job).await.map_err(|_| {
+                                            error!("Transcription worker failed - channel closed");
+                                            DaemonError::WorkerFailed
+                                        })?;
                                     }
                                 } else if next_chunk_id == 0 {
                                     // No chunks emitted and final chunk too short
@@ -797,9 +801,10 @@ impl Daemon {
                                     chunk_id: *next_chunk_id,
                                     is_final: false,
                                 };
-                                if job_tx.send(job).await.is_err() {
-                                    error!("Failed to submit chunk transcription job");
-                                }
+                                job_tx.send(job).await.map_err(|_| {
+                                    error!("Transcription worker failed - channel closed");
+                                    DaemonError::WorkerFailed
+                                })?;
 
                                 // Update state for next chunk
                                 *last_chunk_pos = current_pos;
@@ -884,9 +889,10 @@ impl Daemon {
                                                         chunk_id: *next_chunk_id,
                                                         is_final: false, // Continuous mode, more may come
                                                     };
-                                                    if job_tx.send(job).await.is_err() {
-                                                        error!("Failed to submit VAD transcription job");
-                                                    }
+                                                    job_tx.send(job).await.map_err(|_| {
+                                                        error!("Transcription worker failed - channel closed");
+                                                        DaemonError::WorkerFailed
+                                                    })?;
                                                 }
                                                 *next_chunk_id += 1;
                                             }
