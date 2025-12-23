@@ -1076,7 +1076,9 @@ fn daemonize_process() -> Result<(), DaemonError> {
 
     // Get log directory for stdout/stderr redirection
     let log_dir = Config::data_dir().map_err(|e| DaemonError::DaemonizeFailed(e.to_string()))?;
-    let _ = std::fs::create_dir_all(&log_dir);
+    if let Err(e) = std::fs::create_dir_all(&log_dir) {
+        warn!("Failed to create log directory {}: {}", log_dir.display(), e);
+    }
 
     // Create stdout/stderr files for daemon output
     let stdout_path = log_dir.join("daemon.out");
@@ -1131,7 +1133,9 @@ fn check_and_cleanup_stale_pid() -> Result<(), DaemonError> {
         Err(_) => {
             // Invalid PID file content, remove it
             warn!("Removing invalid PID file");
-            let _ = std::fs::remove_file(&path);
+            if let Err(e) = std::fs::remove_file(&path) {
+                warn!("Failed to remove invalid PID file: {}", e);
+            }
             return Ok(());
         }
     };
@@ -1148,7 +1152,9 @@ fn check_and_cleanup_stale_pid() -> Result<(), DaemonError> {
                 "Removing stale PID file (process {} no longer running)",
                 pid
             );
-            let _ = std::fs::remove_file(&path);
+            if let Err(e) = std::fs::remove_file(&path) {
+                warn!("Failed to remove stale PID file: {}", e);
+            }
         }
     }
 
@@ -1187,7 +1193,9 @@ pub async fn stop() -> Result<(), DaemonError> {
             // Validate PID is in reasonable range
             if pid <= 0 {
                 warn!("Invalid PID {} in PID file, removing", pid);
-                let _ = std::fs::remove_file(&path);
+                if let Err(e) = std::fs::remove_file(&path) {
+                    warn!("Failed to remove invalid PID file: {}", e);
+                }
                 return Err(DaemonError::NotRunning);
             }
 
@@ -1202,7 +1210,9 @@ pub async fn stop() -> Result<(), DaemonError> {
                         "PID {} is not an openhush process, removing stale PID file",
                         pid
                     );
-                    let _ = std::fs::remove_file(&path);
+                    if let Err(e) = std::fs::remove_file(&path) {
+                        warn!("Failed to remove stale PID file: {}", e);
+                    }
                     return Err(DaemonError::NotRunning);
                 }
 

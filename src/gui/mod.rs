@@ -2,7 +2,7 @@
 
 use crate::config::Config;
 use eframe::egui;
-use tracing::info;
+use tracing::{info, warn};
 
 /// Run the preferences GUI as a standalone window
 pub fn run_preferences() -> anyhow::Result<()> {
@@ -420,7 +420,9 @@ impl PreferencesApp {
             ui.horizontal(|ui| {
                 ui.label("Config file:");
                 if ui.link(path.display().to_string()).clicked() {
-                    let _ = open::that(&path);
+                    if let Err(e) = open::that(&path) {
+                        warn!("Failed to open config file: {}", e);
+                    }
                 }
             });
         }

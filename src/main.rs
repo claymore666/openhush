@@ -144,7 +144,9 @@ fn init_logging(verbose: bool, foreground: bool) -> LogGuard {
             .unwrap_or_else(|_| std::env::temp_dir());
 
         // Create log directory if needed
-        let _ = std::fs::create_dir_all(&log_dir);
+        if let Err(e) = std::fs::create_dir_all(&log_dir) {
+            eprintln!("Warning: Failed to create log directory {}: {}", log_dir.display(), e);
+        }
 
         // Daily rotation, keep logs for 7 days
         let file_appender = RollingFileAppender::new(Rotation::DAILY, &log_dir, "openhush.log");
