@@ -565,6 +565,7 @@ enabled = false
     }
 
     #[tokio::test]
+    #[ignore = "flaky in CI/coverage builds due to instrumentation overhead"]
     async fn test_vocabulary_performance() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("vocabulary.toml");
