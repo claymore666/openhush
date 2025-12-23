@@ -122,7 +122,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires ONNX runtime"]
     fn test_silero_vad_creation() {
         let config = test_config();
         let vad = SileroVad::new(&config);
@@ -130,7 +129,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires ONNX runtime"]
     fn test_silero_vad_silence() {
         let config = test_config();
         let mut vad = SileroVad::new(&config).unwrap();
@@ -149,7 +147,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires ONNX runtime"]
     fn test_silero_vad_reset() {
         let config = test_config();
         let mut vad = SileroVad::new(&config).unwrap();
@@ -163,7 +160,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires ONNX runtime"]
     fn test_silero_vad_chunk_size() {
         let config = test_config();
         let vad = SileroVad::new(&config).unwrap();
@@ -172,7 +168,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires ONNX runtime"]
     fn test_silero_vad_partial_chunk() {
         let config = test_config();
         let mut vad = SileroVad::new(&config).unwrap();
@@ -184,7 +179,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires ONNX runtime"]
     fn test_silero_vad_multiple_chunks() {
         let config = test_config();
         let mut vad = SileroVad::new(&config).unwrap();
@@ -196,7 +190,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires ONNX runtime"]
     fn test_silero_vad_empty() {
         let config = test_config();
         let mut vad = SileroVad::new(&config).unwrap();
