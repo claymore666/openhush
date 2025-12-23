@@ -250,18 +250,18 @@ impl AudioBuffer {
         const RNNOISE_SAMPLE_RATE: u32 = 48000;
         const RNNOISE_FRAME_SIZE: usize = 480; // 10ms at 48kHz
 
-        // Keep original for mixing
-        let original_samples = if strength < 1.0 {
-            Some(self.samples.clone())
-        } else {
-            None
-        };
+        let original_len = self.samples.len();
 
-        // Resample 16kHz -> 48kHz for RNNoise
+        // Take ownership of samples to avoid clone when possible
+        // We'll either use this for mixing (strength < 1.0) or discard it
+        let original_samples = std::mem::take(&mut self.samples);
+
+        // Resample 16kHz -> 48kHz for RNNoise (allocation required - different size)
         let upsampled = if self.sample_rate != RNNOISE_SAMPLE_RATE {
-            resample_for_rnnoise(&self.samples, self.sample_rate, RNNOISE_SAMPLE_RATE)
+            resample_for_rnnoise(&original_samples, self.sample_rate, RNNOISE_SAMPLE_RATE)
         } else {
-            self.samples.clone()
+            // Same rate - reuse the buffer we already took
+            original_samples.clone()
         };
 
         // Process through RNNoise
@@ -306,29 +306,29 @@ impl AudioBuffer {
             }
         }
 
-        // Resample 48kHz -> 16kHz back to original rate
-        let downsampled = if self.sample_rate != RNNOISE_SAMPLE_RATE {
+        // Resample 48kHz -> 16kHz back to original rate (allocation required - different size)
+        let mut downsampled = if self.sample_rate != RNNOISE_SAMPLE_RATE {
             resample_for_rnnoise(&denoised, RNNOISE_SAMPLE_RATE, self.sample_rate)
         } else {
             denoised
         };
 
         // Ensure same length as original (resampling may cause slight differences)
-        let original_len = self.samples.len();
-        self.samples = if downsampled.len() >= original_len {
-            downsampled[..original_len].to_vec()
-        } else {
-            let mut result = downsampled;
-            result.resize(original_len, 0.0);
-            result
-        };
+        // Truncate or extend in-place to avoid extra allocation
+        downsampled.truncate(original_len);
+        downsampled.resize(original_len, 0.0);
 
-        // Mix with original if strength < 1.0
-        if let Some(orig) = original_samples {
-            for (i, sample) in self.samples.iter_mut().enumerate() {
-                *sample = orig[i] * (1.0 - strength) + *sample * strength;
+        // Mix with original if strength < 1.0, otherwise assign directly
+        if strength < 1.0 {
+            for (denoised_sample, &orig_sample) in
+                downsampled.iter_mut().zip(original_samples.iter())
+            {
+                *denoised_sample = orig_sample * (1.0 - strength) + *denoised_sample * strength;
             }
         }
+
+        // Assign result (no extra allocation - we move the Vec)
+        self.samples = downsampled;
 
         debug!("Applied RNNoise denoising (strength: {:.2})", strength);
     }

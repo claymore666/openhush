@@ -19,7 +19,7 @@ debug-audio = []
 whisper-rs = "0.13"
 
 # Voice Activity Detection (Silero VAD with bundled ONNX)
-silero-vad-rust = { version = "6.2", default-features = false }
+silero-vad-rust = "6.2"
 
 # Audio capture
 cpal = "0.17"
