@@ -145,7 +145,11 @@ fn init_logging(verbose: bool, foreground: bool) -> LogGuard {
 
         // Create log directory if needed
         if let Err(e) = std::fs::create_dir_all(&log_dir) {
-            eprintln!("Warning: Failed to create log directory {}: {}", log_dir.display(), e);
+            eprintln!(
+                "Warning: Failed to create log directory {}: {}",
+                log_dir.display(),
+                e
+            );
         }
 
         // Daily rotation, keep logs for 7 days

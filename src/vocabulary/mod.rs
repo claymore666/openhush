@@ -276,9 +276,20 @@ impl VocabularyManager {
 
                     if at_word_end {
                         // Found a match at word boundary
-                        result.push_str(&text[last_end..text.char_indices().nth(i).map(|(idx, _)| idx).unwrap_or(text.len())]);
+                        result.push_str(
+                            &text[last_end
+                                ..text
+                                    .char_indices()
+                                    .nth(i)
+                                    .map(|(idx, _)| idx)
+                                    .unwrap_or(text.len())],
+                        );
                         result.push_str(replacement);
-                        last_end = text.char_indices().nth(end_pos).map(|(idx, _)| idx).unwrap_or(text.len());
+                        last_end = text
+                            .char_indices()
+                            .nth(end_pos)
+                            .map(|(idx, _)| idx)
+                            .unwrap_or(text.len());
                         i = end_pos;
                         count += 1;
                         continue;
@@ -312,10 +323,9 @@ impl VocabularyManager {
 
             if at_word_start {
                 // Check if pattern matches (case-insensitive)
-                let matches = pattern_chars
-                    .iter()
-                    .enumerate()
-                    .all(|(j, &pc)| i + j < text_lower_chars.len() && text_lower_chars[i + j] == pc);
+                let matches = pattern_chars.iter().enumerate().all(|(j, &pc)| {
+                    i + j < text_lower_chars.len() && text_lower_chars[i + j] == pc
+                });
 
                 if matches {
                     // Check for word boundary after pattern
@@ -324,9 +334,20 @@ impl VocabularyManager {
 
                     if at_word_end {
                         // Found a match at word boundary
-                        result.push_str(&text[last_end..text.char_indices().nth(i).map(|(idx, _)| idx).unwrap_or(text.len())]);
+                        result.push_str(
+                            &text[last_end
+                                ..text
+                                    .char_indices()
+                                    .nth(i)
+                                    .map(|(idx, _)| idx)
+                                    .unwrap_or(text.len())],
+                        );
                         result.push_str(replacement);
-                        last_end = text.char_indices().nth(end_pos).map(|(idx, _)| idx).unwrap_or(text.len());
+                        last_end = text
+                            .char_indices()
+                            .nth(end_pos)
+                            .map(|(idx, _)| idx)
+                            .unwrap_or(text.len());
                         i = end_pos;
                         count += 1;
                         continue;
@@ -397,14 +418,8 @@ case_sensitive = false
         let manager = VocabularyManager::new(path);
         manager.load().await.unwrap();
 
-        assert_eq!(
-            manager.apply("I'm GONNA do it").await,
-            "I'm going to do it"
-        );
-        assert_eq!(
-            manager.apply("I'm gonna do it").await,
-            "I'm going to do it"
-        );
+        assert_eq!(manager.apply("I'm GONNA do it").await, "I'm going to do it");
+        assert_eq!(manager.apply("I'm gonna do it").await, "I'm going to do it");
     }
 
     #[tokio::test]

@@ -74,12 +74,7 @@ impl TextCorrector {
         let url = format!("{}/api/generate", self.config.ollama_url);
 
         let start = std::time::Instant::now();
-        let response = self
-            .client
-            .post(&url)
-            .json(&request)
-            .send()
-            .await?;
+        let response = self.client.post(&url).json(&request).send().await?;
 
         if !response.status().is_success() {
             let status = response.status();

@@ -31,6 +31,7 @@ pub struct VadResult {
 ///
 /// Implementations must be stateful to handle LSTM hidden states
 /// between consecutive audio chunks.
+#[allow(dead_code)]
 pub trait VadEngine: Send {
     /// Process an audio chunk and return VAD result.
     ///
@@ -103,6 +104,7 @@ impl Default for VadConfig {
 
 /// Speech segment detected by VAD.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct SpeechSegment {
     /// Start position in samples
     pub start: usize,
@@ -222,11 +224,13 @@ impl VadState {
     }
 
     /// Check if currently detecting speech.
+    #[allow(dead_code)]
     pub fn is_speech(&self) -> bool {
         self.in_speech
     }
 
     /// Get the current speech start position, if in speech.
+    #[allow(dead_code)]
     pub fn speech_start(&self) -> Option<usize> {
         self.speech_start
     }

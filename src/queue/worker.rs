@@ -121,7 +121,10 @@ impl TranscriptionWorker {
         // Noise reduction is independent of the preprocessing flag
         // as it's a separate feature that can be enabled standalone
         if config.noise_reduction.enabled {
-            debug!("Applying RNNoise noise reduction (strength: {:.2})", config.noise_reduction.strength);
+            debug!(
+                "Applying RNNoise noise reduction (strength: {:.2})",
+                config.noise_reduction.strength
+            );
             buffer.denoise(config.noise_reduction.strength);
         }
 

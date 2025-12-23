@@ -10,9 +10,11 @@
 //! This design avoids startup delays and provides consistent low-latency capture.
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{Device, SampleRate, Stream, StreamConfig};
+use cpal::{Device, Stream, StreamConfig};
 use nnnoiseless::DenoiseState;
-use rubato::{Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction};
+use rubato::{
+    Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
+};
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
@@ -370,7 +372,10 @@ impl AudioRecorder {
             .default_input_device()
             .ok_or(AudioRecorderError::NoInputDevice)?;
 
-        let device_name = device.name().unwrap_or_else(|_| "unknown".to_string());
+        let device_name = device
+            .description()
+            .map(|d| d.name().to_string())
+            .unwrap_or_else(|_| "unknown".to_string());
         info!("Using audio input device: {}", device_name);
 
         // Get supported config
@@ -378,7 +383,7 @@ impl AudioRecorder {
             .default_input_config()
             .map_err(|e| AudioRecorderError::NoInputConfig(e.to_string()))?;
 
-        let device_sample_rate = supported_config.sample_rate().0;
+        let device_sample_rate = supported_config.sample_rate();
         info!(
             "Device sample rate: {} Hz (will resample to {} Hz)",
             device_sample_rate, SAMPLE_RATE
@@ -387,7 +392,7 @@ impl AudioRecorder {
         // Build config for mono capture
         let config = StreamConfig {
             channels: 1,
-            sample_rate: SampleRate(device_sample_rate),
+            sample_rate: device_sample_rate,
             buffer_size: cpal::BufferSize::Default,
         };
 
@@ -441,7 +446,11 @@ impl AudioRecorder {
     pub fn list_devices() -> Vec<String> {
         let host = cpal::default_host();
         host.input_devices()
-            .map(|devices| devices.filter_map(|d| d.name().ok()).collect())
+            .map(|devices| {
+                devices
+                    .filter_map(|d| d.description().ok().map(|desc| desc.name().to_string()))
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
@@ -544,8 +553,8 @@ impl AudioRecorder {
     /// Returns true if the device is available, false if disconnected.
     #[allow(dead_code)]
     pub fn is_device_available(&self) -> bool {
-        // Try to get the device name - if this fails, device is likely disconnected
-        match self.device.name() {
+        // Try to get the device description - if this fails, device is likely disconnected
+        match self.device.description() {
             Ok(_) => {
                 // Also check if we can still get a config
                 self.device.default_input_config().is_ok()
@@ -557,7 +566,10 @@ impl AudioRecorder {
     /// Get the current device name
     #[allow(dead_code)]
     pub fn device_name(&self) -> String {
-        self.device.name().unwrap_or_else(|_| "unknown".to_string())
+        self.device
+            .description()
+            .map(|d| d.name().to_string())
+            .unwrap_or_else(|_| "unknown".to_string())
     }
 
     /// Try to reinitialize with a new default device.
@@ -578,7 +590,10 @@ impl AudioRecorder {
             .default_input_device()
             .ok_or(AudioRecorderError::NoInputDevice)?;
 
-        let device_name = device.name().unwrap_or_else(|_| "unknown".to_string());
+        let device_name = device
+            .description()
+            .map(|d| d.name().to_string())
+            .unwrap_or_else(|_| "unknown".to_string());
         info!("Found new audio device: {}", device_name);
 
         // Get new config
@@ -586,7 +601,7 @@ impl AudioRecorder {
             .default_input_config()
             .map_err(|e| AudioRecorderError::NoInputConfig(e.to_string()))?;
 
-        let device_sample_rate = supported_config.sample_rate().0;
+        let device_sample_rate = supported_config.sample_rate();
         info!(
             "Device sample rate: {} Hz (will resample to {} Hz)",
             device_sample_rate, SAMPLE_RATE
@@ -595,7 +610,7 @@ impl AudioRecorder {
         // Build new config
         let config = StreamConfig {
             channels: 1,
-            sample_rate: SampleRate(device_sample_rate),
+            sample_rate: device_sample_rate,
             buffer_size: cpal::BufferSize::Default,
         };
 
@@ -629,19 +644,15 @@ pub fn has_input_device() -> bool {
 #[allow(dead_code)]
 pub fn default_device_name() -> Option<String> {
     let host = cpal::default_host();
-    host.default_input_device().and_then(|d| d.name().ok())
+    host.default_input_device()
+        .and_then(|d| d.description().ok().map(|desc| desc.name().to_string()))
 }
 
 /// Resample audio using the specified quality setting
 ///
 /// - `Low`: Fast linear interpolation (lower quality)
 /// - `High`: Sinc interpolation via rubato (higher quality, better for transcription)
-fn resample(
-    samples: &[f32],
-    from_rate: u32,
-    to_rate: u32,
-    quality: ResamplingQuality,
-) -> Vec<f32> {
+fn resample(samples: &[f32], from_rate: u32, to_rate: u32, quality: ResamplingQuality) -> Vec<f32> {
     if from_rate == to_rate {
         return samples.to_vec();
     }
@@ -716,7 +727,10 @@ fn resample_sinc(samples: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
     ) {
         Ok(r) => r,
         Err(e) => {
-            warn!("Failed to create sinc resampler: {}, falling back to linear", e);
+            warn!(
+                "Failed to create sinc resampler: {}, falling back to linear",
+                e
+            );
             return resample_linear(samples, from_rate, to_rate);
         }
     };

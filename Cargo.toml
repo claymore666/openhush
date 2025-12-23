@@ -22,7 +22,7 @@ whisper-rs = "0.13"
 silero-vad-rust = { version = "6.2", default-features = false }
 
 # Audio capture
-cpal = "0.15"
+cpal = "0.17"
 
 # High-quality audio resampling
 rubato = "0.16"
@@ -37,7 +37,7 @@ rdev = "0.5"
 arboard = "3.4"
 
 # Simulated typing (X11/macOS/Windows)
-enigo = "0.2"
+enigo = "0.6"
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }

@@ -8,7 +8,6 @@
 //! 5. Outputs text to clipboard and/or pastes at cursor (in order)
 
 use crate::config::{Config, CorrectionConfig, VocabularyConfig};
-use crate::vad::VadConfig;
 use crate::correction::TextCorrector;
 use crate::engine::{WhisperEngine, WhisperError};
 #[cfg(target_os = "linux")]
@@ -16,9 +15,12 @@ use crate::gui;
 use crate::input::{AudioMark, AudioRecorder, AudioRecorderError, HotkeyEvent, HotkeyListener};
 use crate::output::{OutputError, OutputHandler};
 use crate::platform::{CurrentPlatform, Platform};
-use crate::queue::{worker::spawn_worker, TranscriptionJob, TranscriptionResult, TranscriptionTracker};
+use crate::queue::{
+    worker::spawn_worker, TranscriptionJob, TranscriptionResult, TranscriptionTracker,
+};
 #[cfg(target_os = "linux")]
 use crate::tray::{TrayEvent, TrayManager};
+use crate::vad::VadConfig;
 use crate::vad::{silero::SileroVad, VadEngine, VadError, VadState};
 use crate::vocabulary::{VocabularyError, VocabularyManager};
 use std::path::PathBuf;
@@ -45,6 +47,7 @@ const VAD_PROCESS_INTERVAL_MS: u64 = 32;
 // ============================================================================
 
 /// Initialize Silero VAD if enabled or required for continuous mode.
+#[allow(clippy::type_complexity)]
 fn init_vad(
     vad_config: &VadConfig,
     is_continuous_mode: bool,
@@ -74,9 +77,7 @@ fn init_vad(
 }
 
 /// Initialize vocabulary manager if enabled.
-async fn init_vocabulary(
-    config: &VocabularyConfig,
-) -> Option<Arc<VocabularyManager>> {
+async fn init_vocabulary(config: &VocabularyConfig) -> Option<Arc<VocabularyManager>> {
     if !config.enabled {
         return None;
     }
@@ -185,7 +186,9 @@ async fn process_and_output(
 
     info!(
         "📝 Output (seq {}.{}, {} chars)",
-        result.sequence_id, result.chunk_id, text.len()
+        result.sequence_id,
+        result.chunk_id,
+        text.len()
     );
 
     if let Err(e) = output_handler.output(&text) {
@@ -420,20 +423,20 @@ impl Daemon {
         let vocabulary_manager = init_vocabulary(&self.config.vocabulary).await;
 
         // Vocabulary reload timer (check for file changes periodically)
-        let vocab_reload_interval = if self.config.vocabulary.enabled
-            && self.config.vocabulary.reload_interval_secs > 0
-        {
-            Some(tokio::time::Duration::from_secs(
-                self.config.vocabulary.reload_interval_secs as u64,
-            ))
-        } else {
-            None
-        };
-        let mut vocab_reload_timer: Option<tokio::time::Interval> = vocab_reload_interval.map(|d| {
-            let mut timer = tokio::time::interval(d);
-            timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-            timer
-        });
+        let vocab_reload_interval =
+            if self.config.vocabulary.enabled && self.config.vocabulary.reload_interval_secs > 0 {
+                Some(tokio::time::Duration::from_secs(
+                    self.config.vocabulary.reload_interval_secs as u64,
+                ))
+            } else {
+                None
+            };
+        let mut vocab_reload_timer: Option<tokio::time::Interval> =
+            vocab_reload_interval.map(|d| {
+                let mut timer = tokio::time::interval(d);
+                timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                timer
+            });
 
         // Initialize text corrector if enabled
         let text_corrector = init_corrector(&self.config.correction).await;
@@ -1077,7 +1080,11 @@ fn daemonize_process() -> Result<(), DaemonError> {
     // Get log directory for stdout/stderr redirection
     let log_dir = Config::data_dir().map_err(|e| DaemonError::DaemonizeFailed(e.to_string()))?;
     if let Err(e) = std::fs::create_dir_all(&log_dir) {
-        warn!("Failed to create log directory {}: {}", log_dir.display(), e);
+        warn!(
+            "Failed to create log directory {}: {}",
+            log_dir.display(),
+            e
+        );
     }
 
     // Create stdout/stderr files for daemon output

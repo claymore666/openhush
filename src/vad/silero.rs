@@ -26,8 +26,7 @@ pub struct SileroVad {
 impl SileroVad {
     /// Create a new Silero VAD instance.
     pub fn new(config: &VadConfig) -> Result<Self, VadError> {
-        let model = load_silero_vad()
-            .map_err(|e| VadError::ModelLoad(format!("{:?}", e)))?;
+        let model = load_silero_vad().map_err(|e| VadError::ModelLoad(format!("{:?}", e)))?;
 
         Ok(Self {
             model,
