@@ -16,9 +16,6 @@ pub enum VadError {
 
     #[error("Inference error: {0}")]
     Inference(String),
-
-    #[error("Invalid audio format: {0}")]
-    InvalidFormat(String),
 }
 
 /// Result of VAD analysis for an audio chunk.

@@ -18,12 +18,6 @@ pub enum CorrectionError {
 
     #[error("Ollama returned error: {0}")]
     OllamaError(String),
-
-    #[error("Invalid response from Ollama")]
-    InvalidResponse,
-
-    #[error("Request timeout")]
-    Timeout,
 }
 
 /// Ollama generate request.
@@ -38,6 +32,8 @@ struct OllamaRequest {
 #[derive(Debug, Deserialize)]
 struct OllamaResponse {
     response: String,
+    /// Part of Ollama API response, required for deserialization
+    #[allow(dead_code)]
     done: bool,
 }
 

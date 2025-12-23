@@ -44,9 +44,6 @@ pub enum AudioRecorderError {
 
     #[error("Failed to start audio stream: {0}")]
     StreamStartFailed(String),
-
-    #[error("Recording too short (minimum {MIN_DURATION_SECS}s)")]
-    TooShort,
 }
 
 /// Audio buffer containing recorded samples
