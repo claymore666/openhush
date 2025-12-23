@@ -57,6 +57,29 @@ pub struct Config {
     /// Vocabulary replacement settings
     #[serde(default)]
     pub vocabulary: VocabularyConfig,
+
+    /// Logging settings
+    #[serde(default)]
+    pub logging: LoggingConfig,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct LoggingConfig {
+    /// Log level: trace, debug, info, warn, error
+    #[serde(default = "default_log_level")]
+    pub level: String,
+}
+
+impl Default for LoggingConfig {
+    fn default() -> Self {
+        Self {
+            level: default_log_level(),
+        }
+    }
+}
+
+fn default_log_level() -> String {
+    "info".to_string()
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

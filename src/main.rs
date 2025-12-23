@@ -120,14 +120,22 @@ struct LogGuard {
     _guard: Option<tracing_appender::non_blocking::WorkerGuard>,
 }
 
-fn init_logging(verbose: bool, foreground: bool) -> LogGuard {
-    let filter = if verbose {
-        EnvFilter::try_from_default_env()
-            .unwrap_or_else(|_| EnvFilter::new("openhush=debug,whisper_rs=info"))
-    } else {
-        EnvFilter::try_from_default_env()
-            .unwrap_or_else(|_| EnvFilter::new("openhush=info,whisper_rs=warn"))
-    };
+fn init_logging(verbose: bool, foreground: bool, config_level: Option<&str>) -> LogGuard {
+    // Priority: RUST_LOG env > --verbose flag > config file > default
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        let level = if verbose {
+            "debug"
+        } else {
+            config_level.unwrap_or("info")
+        };
+        // Set openhush to the configured level, whisper_rs one level quieter
+        let whisper_level = match level {
+            "trace" | "debug" => "info",
+            "info" => "warn",
+            _ => "error",
+        };
+        EnvFilter::new(format!("openhush={},whisper_rs={}", level, whisper_level))
+    });
 
     if foreground {
         // Foreground mode: log to stdout with pretty formatting
@@ -189,8 +197,11 @@ async fn main() -> anyhow::Result<()> {
         _ => true, // All other commands run in foreground
     };
 
+    // Load config early to get log level (use default if config fails)
+    let config_log_level = config::Config::load().ok().map(|c| c.logging.level);
+
     // Initialize logging (keep guard alive for the duration of the program)
-    let _log_guard = init_logging(cli.verbose, foreground_mode);
+    let _log_guard = init_logging(cli.verbose, foreground_mode, config_log_level.as_deref());
 
     match cli.command {
         Commands::Start {
