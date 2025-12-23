@@ -256,7 +256,7 @@ async fn main() -> anyhow::Result<()> {
                 };
                 use std::io::Write;
 
-                let model = WhisperModel::from_str(&name).ok_or_else(|| {
+                let model: WhisperModel = name.parse().map_err(|()| {
                     anyhow::anyhow!(
                         "Unknown model '{}'. Available: tiny, base, small, medium, large-v3",
                         name
@@ -322,7 +322,7 @@ async fn main() -> anyhow::Result<()> {
             ModelAction::Remove { name } => {
                 use engine::whisper::{remove_model, WhisperModel};
 
-                let model = WhisperModel::from_str(&name).ok_or_else(|| {
+                let model: WhisperModel = name.parse().map_err(|()| {
                     anyhow::anyhow!(
                         "Unknown model '{}'. Available: tiny, base, small, medium, large-v3",
                         name

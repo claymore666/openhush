@@ -50,19 +50,22 @@ pub enum WhisperModel {
     LargeV3,
 }
 
-impl WhisperModel {
-    /// Parse model name from string
-    pub fn from_str(s: &str) -> Option<Self> {
+impl std::str::FromStr for WhisperModel {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "tiny" => Some(Self::Tiny),
-            "base" => Some(Self::Base),
-            "small" => Some(Self::Small),
-            "medium" => Some(Self::Medium),
-            "large" | "large-v3" | "largev3" => Some(Self::LargeV3),
-            _ => None,
+            "tiny" => Ok(Self::Tiny),
+            "base" => Ok(Self::Base),
+            "small" => Ok(Self::Small),
+            "medium" => Ok(Self::Medium),
+            "large" | "large-v3" | "largev3" => Ok(Self::LargeV3),
+            _ => Err(()),
         }
     }
+}
 
+impl WhisperModel {
     /// Get the model filename
     pub fn filename(&self) -> &'static str {
         match self {
@@ -168,7 +171,10 @@ impl WhisperEngine {
     pub fn from_config(config: &Config) -> Result<Self, WhisperError> {
         let data_dir = Config::data_dir().map_err(|e| WhisperError::LoadFailed(e.to_string()))?;
 
-        let model = WhisperModel::from_str(config.transcription.effective_model())
+        let model = config
+            .transcription
+            .effective_model()
+            .parse()
             .unwrap_or(WhisperModel::Base);
 
         let model_path = data_dir.join("models").join(model.filename());
@@ -631,12 +637,9 @@ mod tests {
 
     #[test]
     fn test_model_from_str() {
-        assert_eq!(WhisperModel::from_str("tiny"), Some(WhisperModel::Tiny));
-        assert_eq!(
-            WhisperModel::from_str("LARGE-V3"),
-            Some(WhisperModel::LargeV3)
-        );
-        assert_eq!(WhisperModel::from_str("invalid"), None);
+        assert_eq!("tiny".parse(), Ok(WhisperModel::Tiny));
+        assert_eq!("LARGE-V3".parse(), Ok(WhisperModel::LargeV3));
+        assert_eq!("invalid".parse::<WhisperModel>(), Err(()));
     }
 
     #[test]

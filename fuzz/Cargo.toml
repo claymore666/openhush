@@ -18,8 +18,8 @@ path = ".."
 # Fuzz targets
 
 [[bin]]
-name = "audio_resample"
-path = "fuzz_targets/audio_resample.rs"
+name = "audio_processing"
+path = "fuzz_targets/audio_processing.rs"
 test = false
 doc = false
 bench = false

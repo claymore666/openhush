@@ -156,18 +156,15 @@ fn notify_backpressure(notify_enabled: bool) {
 }
 
 /// Reload configuration from disk and update runtime state.
-/// Returns the new separator if reload was successful.
-fn reload_config(config: &mut Config, separator: &mut String) -> bool {
+fn reload_config(config: &mut Config, separator: &mut String) {
     match Config::load() {
         Ok(new_config) => {
             separator.clone_from(&new_config.queue.separator);
             *config = new_config;
             info!("Configuration reloaded successfully");
-            true
         }
         Err(e) => {
             error!("Failed to reload configuration: {}", e);
-            false
         }
     }
 }

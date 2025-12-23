@@ -126,14 +126,14 @@ pub struct HotkeyConfig {
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum TranscriptionPreset {
-    /// Fastest response for live dictation (tiny/small model, 30s buffer)
+    /// Fastest response for live dictation (small model)
     Instant,
-    /// Balanced speed and accuracy (small/medium model, 60s buffer)
+    /// Balanced speed and accuracy (medium model)
     #[default]
     Balanced,
-    /// Best accuracy for important content (medium/large-v3 model, 120s buffer)
+    /// Best accuracy for important content (large-v3 model)
     Quality,
-    /// Use explicit model/audio settings from config
+    /// Use explicit model setting from config
     Custom,
 }
 
