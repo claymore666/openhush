@@ -139,6 +139,7 @@ pub enum TranscriptionPreset {
 
 impl TranscriptionPreset {
     /// Get the recommended model for this preset.
+    #[must_use]
     pub fn model(&self) -> &'static str {
         match self {
             Self::Instant => "small",
@@ -176,6 +177,7 @@ pub struct TranscriptionConfig {
 
 impl TranscriptionConfig {
     /// Get the effective model based on preset.
+    #[must_use]
     pub fn effective_model(&self) -> &str {
         if self.preset == TranscriptionPreset::Custom {
             &self.model

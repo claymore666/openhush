@@ -59,17 +59,20 @@ pub struct AudioBuffer {
 
 impl AudioBuffer {
     /// Get duration in seconds
+    #[must_use]
     pub fn duration_secs(&self) -> f32 {
         self.samples.len() as f32 / self.sample_rate as f32
     }
 
     /// Check if buffer meets minimum duration
+    #[must_use]
     #[allow(dead_code)]
     pub fn is_valid(&self) -> bool {
         self.duration_secs() >= MIN_DURATION_SECS
     }
 
     /// Convert to i16 samples for Whisper
+    #[must_use]
     #[allow(dead_code)]
     pub fn to_i16(&self) -> Vec<i16> {
         self.samples
@@ -79,6 +82,7 @@ impl AudioBuffer {
     }
 
     /// Calculate RMS (Root Mean Square) level in dB
+    #[must_use]
     pub fn rms_db(&self) -> f32 {
         if self.samples.is_empty() {
             return f32::NEG_INFINITY;

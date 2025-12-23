@@ -67,6 +67,7 @@ impl std::str::FromStr for WhisperModel {
 
 impl WhisperModel {
     /// Get the model filename
+    #[must_use]
     pub fn filename(&self) -> &'static str {
         match self {
             Self::Tiny => "ggml-tiny.bin",
@@ -78,6 +79,7 @@ impl WhisperModel {
     }
 
     /// Get model size in bytes (approximate)
+    #[must_use]
     #[allow(dead_code)]
     pub fn size_bytes(&self) -> u64 {
         match self {
@@ -378,6 +380,7 @@ pub fn models_dir() -> Result<PathBuf, WhisperError> {
 }
 
 /// Check if a model is downloaded
+#[must_use]
 #[allow(dead_code)]
 pub fn is_model_downloaded(model: WhisperModel) -> bool {
     if let Ok(dir) = models_dir() {
@@ -388,6 +391,7 @@ pub fn is_model_downloaded(model: WhisperModel) -> bool {
 }
 
 /// List downloaded models
+#[must_use]
 #[allow(dead_code)]
 pub fn list_downloaded_models() -> Vec<WhisperModel> {
     all_models()
@@ -397,6 +401,7 @@ pub fn list_downloaded_models() -> Vec<WhisperModel> {
 }
 
 /// Get all available models
+#[must_use]
 pub fn all_models() -> Vec<WhisperModel> {
     vec![
         WhisperModel::Tiny,
@@ -408,6 +413,7 @@ pub fn all_models() -> Vec<WhisperModel> {
 }
 
 /// Get model file size in bytes (approximate)
+#[must_use]
 pub fn model_size_bytes(model: WhisperModel) -> u64 {
     match model {
         WhisperModel::Tiny => 75_000_000,       // ~75MB
@@ -419,6 +425,7 @@ pub fn model_size_bytes(model: WhisperModel) -> u64 {
 }
 
 /// Format bytes as human-readable size
+#[must_use]
 pub fn format_size(bytes: u64) -> String {
     const KB: u64 = 1024;
     const MB: u64 = KB * 1024;
