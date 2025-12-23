@@ -104,7 +104,7 @@ jobs:
       - name: Run tests
         run: cargo test
         env:
-          ORT_DYLIB_PATH: ~/.local/lib/onnxruntime/lib/libonnxruntime.so
+          ORT_DYLIB_PATH: /home/runner/.local/lib/onnxruntime/lib/libonnxruntime.so
 
   # ===================
   # Code Coverage
@@ -140,7 +140,7 @@ jobs:
       - name: Run coverage
         run: cargo tarpaulin --out xml --out html --ignore-tests --exclude-files "tests/*"
         env:
-          ORT_DYLIB_PATH: ~/.local/lib/onnxruntime/lib/libonnxruntime.so
+          ORT_DYLIB_PATH: /home/runner/.local/lib/onnxruntime/lib/libonnxruntime.so
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
