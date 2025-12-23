@@ -144,6 +144,54 @@ async fn init_corrector(config: &CorrectionConfig) -> Option<Arc<TextCorrector>>
 // Output Processing
 // ============================================================================
 
+/// Show backpressure notification to user (Linux only).
+#[cfg(unix)]
+fn notify_backpressure(notify_enabled: bool) {
+    if notify_enabled {
+        let _ = notify_rust::Notification::new()
+            .summary("OpenHush")
+            .body("Transcription queue full - audio dropped")
+            .show();
+    }
+}
+
+/// Reload configuration from disk and update runtime state.
+/// Returns the new separator if reload was successful.
+fn reload_config(config: &mut Config, separator: &mut String) -> bool {
+    match Config::load() {
+        Ok(new_config) => {
+            separator.clone_from(&new_config.queue.separator);
+            *config = new_config;
+            info!("Configuration reloaded successfully");
+            true
+        }
+        Err(e) => {
+            error!("Failed to reload configuration: {}", e);
+            false
+        }
+    }
+}
+
+/// Backpressure configuration for transcription queue management.
+#[derive(Clone, Copy)]
+struct BackpressureConfig {
+    max_pending: u32,
+    high_water_mark: u32,
+    strategy: crate::config::BackpressureStrategy,
+    notify: bool,
+}
+
+impl BackpressureConfig {
+    fn from_queue_config(queue: &crate::config::QueueConfig) -> Self {
+        Self {
+            max_pending: queue.max_pending,
+            high_water_mark: queue.high_water_mark,
+            strategy: queue.backpressure_strategy,
+            notify: queue.notify_on_backpressure,
+        }
+    }
+}
+
 /// Process and output a transcription result.
 ///
 /// Applies vocabulary replacements, LLM correction, and outputs the text.
@@ -467,10 +515,7 @@ impl Daemon {
         let mut chunk_separator = self.config.queue.separator.clone();
 
         // Backpressure configuration
-        let max_pending = self.config.queue.max_pending;
-        let high_water_mark = self.config.queue.high_water_mark;
-        let backpressure_strategy = self.config.queue.backpressure_strategy;
-        let notify_on_backpressure = self.config.queue.notify_on_backpressure;
+        let bp = BackpressureConfig::from_queue_config(&self.config.queue);
 
         // Streaming chunk interval (convert to Duration)
         let chunk_interval = if chunk_interval_secs > 0.0 {
@@ -523,16 +568,7 @@ impl Daemon {
                     }
                     _ = sighup.recv() => {
                         info!("SIGHUP received, reloading configuration...");
-                        match Config::load() {
-                            Ok(new_config) => {
-                                chunk_separator.clone_from(&new_config.queue.separator);
-                                self.config = new_config;
-                                info!("Configuration reloaded successfully");
-                            }
-                            Err(e) => {
-                                error!("Failed to reload configuration: {}", e);
-                            }
-                        }
+                        reload_config(&mut self.config, &mut chunk_separator);
                         continue; // Don't break, continue with new config
                     }
                     // Immediate timeout to make this non-blocking
@@ -671,9 +707,9 @@ impl Daemon {
                                     let accepted = tracker.add_pending_with_config(
                                         mark.sequence_id,
                                         next_chunk_id,
-                                        max_pending,
-                                        high_water_mark,
-                                        backpressure_strategy,
+                                        bp.max_pending,
+                                        bp.high_water_mark,
+                                        bp.strategy,
                                     );
                                     if !accepted {
                                         warn!(
@@ -681,12 +717,7 @@ impl Daemon {
                                             mark.sequence_id, next_chunk_id
                                         );
                                         #[cfg(unix)]
-                                        if notify_on_backpressure {
-                                            let _ = notify_rust::Notification::new()
-                                                .summary("OpenHush")
-                                                .body("Transcription queue full - audio dropped")
-                                                .show();
-                                        }
+                                        notify_backpressure(bp.notify);
                                     } else {
                                         // Submit final job only if accepted
                                         let job = TranscriptionJob {
@@ -779,9 +810,9 @@ impl Daemon {
                             let accepted = tracker.add_pending_with_config(
                                 mark.sequence_id,
                                 *next_chunk_id,
-                                max_pending,
-                                high_water_mark,
-                                backpressure_strategy,
+                                bp.max_pending,
+                                bp.high_water_mark,
+                                bp.strategy,
                             );
                             if !accepted {
                                 warn!(
@@ -789,12 +820,7 @@ impl Daemon {
                                     mark.sequence_id, *next_chunk_id
                                 );
                                 #[cfg(unix)]
-                                if notify_on_backpressure {
-                                    let _ = notify_rust::Notification::new()
-                                        .summary("OpenHush")
-                                        .body("Transcription queue full - audio dropped")
-                                        .show();
-                                }
+                                notify_backpressure(bp.notify);
                                 // Skip submitting the job but still update state
                                 *last_chunk_pos = current_pos;
                                 *next_chunk_id += 1;
@@ -870,9 +896,9 @@ impl Daemon {
                                                 let accepted = tracker.add_pending_with_config(
                                                     mark.sequence_id,
                                                     *next_chunk_id,
-                                                    max_pending,
-                                                    high_water_mark,
-                                                    backpressure_strategy,
+                                                    bp.max_pending,
+                                                    bp.high_water_mark,
+                                                    bp.strategy,
                                                 );
                                                 if !accepted {
                                                     warn!(
@@ -880,12 +906,7 @@ impl Daemon {
                                                         mark.sequence_id, *next_chunk_id
                                                     );
                                                     #[cfg(unix)]
-                                                    if notify_on_backpressure {
-                                                        let _ = notify_rust::Notification::new()
-                                                            .summary("OpenHush")
-                                                            .body("Transcription queue full - audio dropped")
-                                                            .show();
-                                                    }
+                                                    notify_backpressure(bp.notify);
                                                 } else {
                                                     // Submit transcription job
                                                     let job = TranscriptionJob {
