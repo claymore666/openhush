@@ -261,19 +261,22 @@ impl WhisperEngine {
 
         let duration_ms = start_time.elapsed().as_millis() as u64;
 
-        // Detect language (if auto)
+        // Get detected/used language
         let detected_lang = if self.language == "auto" {
-            // whisper-rs doesn't expose detected language easily
-            // For now, just report "auto"
-            "auto".to_string()
+            // Get detected language ID from whisper state
+            match state.full_lang_id_from_state() {
+                Ok(lang_id) => lang_id_to_code(lang_id).to_string(),
+                Err(_) => "auto".to_string(),
+            }
         } else {
             self.language.clone()
         };
 
         info!(
-            "Transcription complete ({} chars, {}ms)",
+            "Transcription complete ({} chars, {}ms, lang: {})",
             text.len(),
-            duration_ms
+            duration_ms,
+            detected_lang
         );
 
         Ok(TranscriptionResult {
@@ -394,6 +397,116 @@ pub fn list_downloaded_models() -> Vec<WhisperModel> {
         .filter(|m| is_model_downloaded(**m))
         .copied()
         .collect()
+}
+
+/// Convert whisper language ID to ISO 639-1 language code.
+///
+/// Whisper uses 0-indexed language IDs matching its internal token table.
+/// This covers the most common languages; unknown IDs return "unknown".
+fn lang_id_to_code(id: std::ffi::c_int) -> &'static str {
+    // Language IDs from whisper.cpp (see whisper.h)
+    match id {
+        0 => "en",   // english
+        1 => "zh",   // chinese
+        2 => "de",   // german
+        3 => "es",   // spanish
+        4 => "ru",   // russian
+        5 => "ko",   // korean
+        6 => "fr",   // french
+        7 => "ja",   // japanese
+        8 => "pt",   // portuguese
+        9 => "tr",   // turkish
+        10 => "pl",  // polish
+        11 => "ca",  // catalan
+        12 => "nl",  // dutch
+        13 => "ar",  // arabic
+        14 => "sv",  // swedish
+        15 => "it",  // italian
+        16 => "id",  // indonesian
+        17 => "hi",  // hindi
+        18 => "fi",  // finnish
+        19 => "vi",  // vietnamese
+        20 => "he",  // hebrew
+        21 => "uk",  // ukrainian
+        22 => "el",  // greek
+        23 => "ms",  // malay
+        24 => "cs",  // czech
+        25 => "ro",  // romanian
+        26 => "da",  // danish
+        27 => "hu",  // hungarian
+        28 => "ta",  // tamil
+        29 => "no",  // norwegian
+        30 => "th",  // thai
+        31 => "ur",  // urdu
+        32 => "hr",  // croatian
+        33 => "bg",  // bulgarian
+        34 => "lt",  // lithuanian
+        35 => "la",  // latin
+        36 => "mi",  // maori
+        37 => "ml",  // malayalam
+        38 => "cy",  // welsh
+        39 => "sk",  // slovak
+        40 => "te",  // telugu
+        41 => "fa",  // persian
+        42 => "lv",  // latvian
+        43 => "bn",  // bengali
+        44 => "sr",  // serbian
+        45 => "az",  // azerbaijani
+        46 => "sl",  // slovenian
+        47 => "kn",  // kannada
+        48 => "et",  // estonian
+        49 => "mk",  // macedonian
+        50 => "br",  // breton
+        51 => "eu",  // basque
+        52 => "is",  // icelandic
+        53 => "hy",  // armenian
+        54 => "ne",  // nepali
+        55 => "mn",  // mongolian
+        56 => "bs",  // bosnian
+        57 => "kk",  // kazakh
+        58 => "sq",  // albanian
+        59 => "sw",  // swahili
+        60 => "gl",  // galician
+        61 => "mr",  // marathi
+        62 => "pa",  // punjabi
+        63 => "si",  // sinhala
+        64 => "km",  // khmer
+        65 => "sn",  // shona
+        66 => "yo",  // yoruba
+        67 => "so",  // somali
+        68 => "af",  // afrikaans
+        69 => "oc",  // occitan
+        70 => "ka",  // georgian
+        71 => "be",  // belarusian
+        72 => "tg",  // tajik
+        73 => "sd",  // sindhi
+        74 => "gu",  // gujarati
+        75 => "am",  // amharic
+        76 => "yi",  // yiddish
+        77 => "lo",  // lao
+        78 => "uz",  // uzbek
+        79 => "fo",  // faroese
+        80 => "ht",  // haitian creole
+        81 => "ps",  // pashto
+        82 => "tk",  // turkmen
+        83 => "nn",  // nynorsk
+        84 => "mt",  // maltese
+        85 => "sa",  // sanskrit
+        86 => "lb",  // luxembourgish
+        87 => "my",  // myanmar
+        88 => "bo",  // tibetan
+        89 => "tl",  // tagalog
+        90 => "mg",  // malagasy
+        91 => "as",  // assamese
+        92 => "tt",  // tatar
+        93 => "haw", // hawaiian
+        94 => "ln",  // lingala
+        95 => "ha",  // hausa
+        96 => "ba",  // bashkir
+        97 => "jw",  // javanese
+        98 => "su",  // sundanese
+        _ => "unknown",
+    }
 }
 
 #[cfg(test)]
