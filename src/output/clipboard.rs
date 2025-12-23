@@ -49,7 +49,7 @@ mod tests {
     use super::*;
 
     #[test]
-    #[ignore] // Requires display server
+    #[ignore = "Requires display server"]
     fn test_clipboard_roundtrip() {
         let text = "Hello, OpenHush!";
         copy_to_clipboard(text).unwrap();

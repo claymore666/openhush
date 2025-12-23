@@ -76,15 +76,10 @@ daemonize = "0.5"
 # Notifications
 notify-rust = "4"
 
-# Audio feedback
-rodio = "0.19"
-
 # Image processing (for tray icon)
 image = "0.25"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-# Linux TTY input
-evdev = "0.12"
 # GTK for tray initialization
 gtk = "0.18"
 # System tray (Linux only for now)

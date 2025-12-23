@@ -58,11 +58,13 @@ fn init_vad(
 
     match SileroVad::new(vad_config) {
         Ok(vad) => {
+            // Get sample rate from VAD engine instead of hardcoding
+            let sample_rate = vad.sample_rate();
             info!(
-                "Silero VAD initialized (threshold: {:.2}, min_silence: {}ms, min_speech: {}ms)",
-                vad_config.threshold, vad_config.min_silence_ms, vad_config.min_speech_ms
+                "Silero VAD initialized (threshold: {:.2}, min_silence: {}ms, min_speech: {}ms, sample_rate: {}Hz)",
+                vad_config.threshold, vad_config.min_silence_ms, vad_config.min_speech_ms, sample_rate
             );
-            let state = VadState::new(vad_config.clone(), 16000);
+            let state = VadState::new(vad_config.clone(), sample_rate);
             Ok((Some(Box::new(vad) as Box<dyn VadEngine>), Some(state)))
         }
         Err(e) => {
@@ -165,11 +167,10 @@ async fn process_and_output(
     }
 
     // Add separator before chunks after the first
-    let mut text = if result.chunk_id > 0 {
-        format!("{}{}", chunk_separator, result.text)
-    } else {
-        result.text
-    };
+    let mut text = result.text;
+    if result.chunk_id > 0 {
+        text.insert_str(0, chunk_separator);
+    }
 
     // Apply vocabulary replacements
     if let Some(ref vocab) = vocabulary_manager {
@@ -519,7 +520,7 @@ impl Daemon {
                         info!("SIGHUP received, reloading configuration...");
                         match Config::load() {
                             Ok(new_config) => {
-                                chunk_separator = new_config.queue.separator.clone();
+                                chunk_separator.clone_from(&new_config.queue.separator);
                                 self.config = new_config;
                                 info!("Configuration reloaded successfully");
                             }

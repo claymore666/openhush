@@ -200,7 +200,8 @@ impl AudioRingBuffer {
             mark.position
         };
 
-        // Extract samples
+        // SAFETY: Read-only access to buffer. Atomic read_pos/write_pos ensure we only
+        // read samples that have been fully written and won't be overwritten during read.
         let buffer = unsafe { &*self.buffer.get() };
         let mut result = Vec::with_capacity(samples_available);
 
@@ -257,7 +258,8 @@ impl AudioRingBuffer {
             from_pos
         };
 
-        // Extract samples
+        // SAFETY: Read-only access to buffer. Atomic positions ensure we only read
+        // samples that have been fully written and won't be overwritten during read.
         let buffer = unsafe { &*self.buffer.get() };
         let mut result = Vec::with_capacity(samples_available);
 

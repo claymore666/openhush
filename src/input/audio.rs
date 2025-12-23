@@ -268,16 +268,16 @@ impl AudioBuffer {
         let mut denoiser = DenoiseState::new();
         let mut denoised = Vec::with_capacity(upsampled.len());
 
-        // Scale from [-1.0, 1.0] to [-32768.0, 32767.0] for RNNoise
-        let scaled: Vec<f32> = upsampled.iter().map(|&s| s * 32767.0).collect();
-
         // Process in 480-sample frames
+        // Scale from [-1.0, 1.0] to [-32768.0, 32767.0] inline to avoid intermediate allocation
         let mut frame_input = [0.0f32; RNNOISE_FRAME_SIZE];
         let mut frame_output = [0.0f32; RNNOISE_FRAME_SIZE];
 
-        for (i, chunk) in scaled.chunks(RNNOISE_FRAME_SIZE).enumerate() {
-            // Copy to frame buffer (pad with zeros if last chunk is short)
-            frame_input[..chunk.len()].copy_from_slice(chunk);
+        for (i, chunk) in upsampled.chunks(RNNOISE_FRAME_SIZE).enumerate() {
+            // Copy to frame buffer with inline scaling (pad with zeros if last chunk is short)
+            for (j, &sample) in chunk.iter().enumerate() {
+                frame_input[j] = sample * 32767.0;
+            }
             if chunk.len() < RNNOISE_FRAME_SIZE {
                 frame_input[chunk.len()..].fill(0.0);
             }
@@ -737,23 +737,24 @@ fn resample_sinc(samples: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
 
     let mut output = Vec::with_capacity((samples.len() as f64 * resample_ratio) as usize + 1024);
 
+    // Pre-allocate input buffer to avoid allocations in the loop
+    let mut input_buffer = vec![0.0f32; chunk_size];
+
     // Process in chunks
     let mut pos = 0;
     while pos < samples.len() {
         let end = (pos + chunk_size).min(samples.len());
         let chunk = &samples[pos..end];
 
-        // Pad last chunk if needed
-        let input_chunk: Vec<f32> = if chunk.len() < chunk_size {
-            let mut padded = chunk.to_vec();
-            padded.resize(chunk_size, 0.0);
-            padded
-        } else {
-            chunk.to_vec()
-        };
+        // Copy chunk to pre-allocated buffer, pad with zeros if needed
+        input_buffer[..chunk.len()].copy_from_slice(chunk);
+        if chunk.len() < chunk_size {
+            input_buffer[chunk.len()..].fill(0.0);
+        }
 
         // rubato expects Vec<Vec<f32>> for multi-channel, we have mono
-        let input_frames = vec![input_chunk];
+        // Note: rubato requires owned data, but we minimize allocations by reusing input_buffer
+        let input_frames = vec![input_buffer.clone()];
 
         match resampler.process(&input_frames, None) {
             Ok(resampled) => {

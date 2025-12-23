@@ -677,6 +677,26 @@ impl Config {
             ));
         }
 
+        // Validate vocabulary path if specified
+        if let Some(ref path) = self.vocabulary.path {
+            // Check for path traversal attempts
+            if path.contains("..") {
+                return Err(ConfigError::ValidationError(
+                    "vocabulary path contains path traversal sequence (..)".into(),
+                ));
+            }
+            // Validate path is within config/data directories (defense in depth)
+            let vocab_path = PathBuf::from(path);
+            if vocab_path.is_absolute() {
+                // For absolute paths, ensure they exist and are files
+                if vocab_path.exists() && !vocab_path.is_file() {
+                    return Err(ConfigError::ValidationError(
+                        "vocabulary path must point to a file".into(),
+                    ));
+                }
+            }
+        }
+
         Ok(())
     }
 

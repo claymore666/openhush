@@ -31,7 +31,6 @@ pub struct VadResult {
 ///
 /// Implementations must be stateful to handle LSTM hidden states
 /// between consecutive audio chunks.
-#[allow(dead_code)]
 pub trait VadEngine: Send {
     /// Process an audio chunk and return VAD result.
     ///
@@ -48,6 +47,7 @@ pub trait VadEngine: Send {
     fn reset(&mut self);
 
     /// Get the expected chunk size in samples.
+    #[allow(dead_code)]
     fn chunk_size(&self) -> usize;
 
     /// Get the sample rate this VAD expects.
