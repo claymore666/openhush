@@ -20,17 +20,18 @@ jobs:
             name: linux-x86_64
             cross: false
 
-          # Linux x86_64 (musl - static)
-          - target: x86_64-unknown-linux-musl
-            os: ubuntu-22.04
-            name: linux-x86_64-musl
-            cross: true
-
-          # Linux aarch64 (ARM64)
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-22.04
-            name: linux-aarch64
-            cross: true
+          # TODO: Re-enable when cross-rs images are fixed
+          # # Linux x86_64 (musl - static)
+          # - target: x86_64-unknown-linux-musl
+          #   os: ubuntu-22.04
+          #   name: linux-x86_64-musl
+          #   cross: true
+          #
+          # # Linux aarch64 (ARM64)
+          # - target: aarch64-unknown-linux-gnu
+          #   os: ubuntu-22.04
+          #   name: linux-aarch64
+          #   cross: true
 
           # macOS x86_64 (Intel) - cross-compiled on ARM runner
           - target: x86_64-apple-darwin
