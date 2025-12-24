@@ -281,7 +281,7 @@ jobs:
         if: matrix.feature == 'vulkan' && runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libvulkan-dev vulkan-tools spirv-tools glslang-tools
+          sudo apt-get install -y libvulkan-dev vulkan-tools spirv-tools glslang-tools glslc shaderc
 
       - uses: Swatinem/rust-cache@v2
         with:
