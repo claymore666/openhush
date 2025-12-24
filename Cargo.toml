@@ -65,28 +65,33 @@ anyhow = "1"
 # Time/date for crash reports
 chrono = "0.4"
 
+# System theme detection (dark mode)
+dark-light = "1.1"
+
 # Platform paths (XDG on Linux, native elsewhere)
 directories = "5"
 dirs = "5"
 
-# Unix process management
-[target.'cfg(unix)'.dependencies]
-nix = { version = "0.29", features = ["signal", "process", "fs"] }
-
-# Notifications
+# Notifications (cross-platform: Linux, macOS, Windows)
 notify-rust = "4"
 
 # Image processing (for tray icon)
 image = "0.25"
 
+# GUI (preferences window)
+eframe = "0.29"
+egui = "0.29"
+
+# Open files/URLs
+open = "5"
+
+# Unix process management
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.29", features = ["signal", "process", "fs"] }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 # System tray via D-Bus StatusNotifierItem (no GTK required)
 ksni = "0.3"
-# GUI (preferences window, Linux only for now)
-eframe = "0.29"
-egui = "0.29"
-# Open files/URLs
-open = "5"
 
 [dev-dependencies]
 tempfile = "3"

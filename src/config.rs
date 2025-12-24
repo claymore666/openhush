@@ -61,6 +61,10 @@ pub struct Config {
     /// Logging settings
     #[serde(default)]
     pub logging: LoggingConfig,
+
+    /// Appearance settings (theme)
+    #[serde(default)]
+    pub appearance: AppearanceConfig,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -80,6 +84,63 @@ impl Default for LoggingConfig {
 
 fn default_log_level() -> String {
     "info".to_string()
+}
+
+/// Theme setting for the UI
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Theme {
+    /// Light theme
+    Light,
+    /// Dark theme
+    Dark,
+    /// Follow system preference (using dark-light crate)
+    #[default]
+    Auto,
+}
+
+impl Theme {
+    /// Detect the effective theme based on system preference.
+    /// Returns true if dark mode should be used.
+    #[must_use]
+    pub fn is_dark(&self) -> bool {
+        match self {
+            Theme::Light => false,
+            Theme::Dark => true,
+            Theme::Auto => {
+                // Use dark-light crate to detect system theme
+                match dark_light::detect() {
+                    dark_light::Mode::Dark => true,
+                    dark_light::Mode::Light | dark_light::Mode::Default => false,
+                }
+            }
+        }
+    }
+
+    /// Get display name for the theme
+    #[must_use]
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Theme::Light => "Light",
+            Theme::Dark => "Dark",
+            Theme::Auto => "System",
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AppearanceConfig {
+    /// Theme: light, dark, or auto (follow system)
+    #[serde(default)]
+    pub theme: Theme,
+}
+
+impl Default for AppearanceConfig {
+    fn default() -> Self {
+        Self {
+            theme: Theme::default(),
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -1209,5 +1270,59 @@ filler_mode = "aggressive"
             TranscriptionPreset::default(),
             TranscriptionPreset::Balanced
         );
+    }
+
+    // ===================
+    // Theme Tests
+    // ===================
+
+    #[test]
+    fn test_theme_default() {
+        assert_eq!(Theme::default(), Theme::Auto);
+    }
+
+    #[test]
+    fn test_theme_is_dark() {
+        assert!(!Theme::Light.is_dark());
+        assert!(Theme::Dark.is_dark());
+        // Auto depends on system, so we just verify it returns a bool
+        let _ = Theme::Auto.is_dark();
+    }
+
+    #[test]
+    fn test_theme_display_name() {
+        assert_eq!(Theme::Light.display_name(), "Light");
+        assert_eq!(Theme::Dark.display_name(), "Dark");
+        assert_eq!(Theme::Auto.display_name(), "System");
+    }
+
+    #[test]
+    fn test_parse_theme_from_toml() {
+        let toml_str = r#"
+[appearance]
+theme = "dark"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.appearance.theme, Theme::Dark);
+
+        let toml_str = r#"
+[appearance]
+theme = "light"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.appearance.theme, Theme::Light);
+
+        let toml_str = r#"
+[appearance]
+theme = "auto"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.appearance.theme, Theme::Auto);
+    }
+
+    #[test]
+    fn test_appearance_config_default() {
+        let config = AppearanceConfig::default();
+        assert_eq!(config.theme, Theme::Auto);
     }
 }

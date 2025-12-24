@@ -1,11 +1,14 @@
 //! GUI preferences window using egui.
 
-use crate::config::Config;
+use crate::config::{Config, Theme};
 use eframe::egui;
 use tracing::{info, warn};
 
 /// Run the preferences GUI as a standalone window
 pub fn run_preferences() -> anyhow::Result<()> {
+    let config = Config::load().unwrap_or_default();
+    let is_dark = config.appearance.theme.is_dark();
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([500.0, 600.0])
@@ -16,9 +19,22 @@ pub fn run_preferences() -> anyhow::Result<()> {
     eframe::run_native(
         "OpenHush Preferences",
         options,
-        Box::new(|_cc| Ok(Box::new(PreferencesApp::new()))),
+        Box::new(move |cc| {
+            // Apply theme based on config
+            apply_theme(&cc.egui_ctx, is_dark);
+            Ok(Box::new(PreferencesApp::with_config(config)))
+        }),
     )
     .map_err(|e| anyhow::anyhow!("Failed to run preferences: {}", e))
+}
+
+/// Apply light or dark theme to egui context
+fn apply_theme(ctx: &egui::Context, is_dark: bool) {
+    if is_dark {
+        ctx.set_visuals(egui::Visuals::dark());
+    } else {
+        ctx.set_visuals(egui::Visuals::light());
+    }
 }
 
 /// Spawn preferences window as a separate process (for use from daemon)
@@ -44,12 +60,17 @@ enum Tab {
     Transcription,
     Audio,
     Output,
+    Appearance,
     Advanced,
 }
 
 impl PreferencesApp {
     fn new() -> Self {
         let config = Config::load().unwrap_or_default();
+        Self::with_config(config)
+    }
+
+    fn with_config(config: Config) -> Self {
         Self {
             config,
             active_tab: Tab::Hotkey,
@@ -399,6 +420,50 @@ impl PreferencesApp {
         }
     }
 
+    fn show_appearance_tab(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        ui.heading("Appearance");
+        ui.add_space(10.0);
+
+        ui.horizontal(|ui| {
+            ui.label("Theme:");
+            let theme_text = self.config.appearance.theme.display_name();
+            egui::ComboBox::from_id_salt("theme")
+                .selected_text(theme_text)
+                .show_ui(ui, |ui| {
+                    for (theme, label) in [
+                        (Theme::Auto, "System"),
+                        (Theme::Light, "Light"),
+                        (Theme::Dark, "Dark"),
+                    ] {
+                        if ui
+                            .selectable_value(&mut self.config.appearance.theme, theme, label)
+                            .changed()
+                        {
+                            self.unsaved_changes = true;
+                            // Apply theme immediately for preview
+                            apply_theme(ctx, self.config.appearance.theme.is_dark());
+                        }
+                    }
+                });
+        });
+
+        ui.add_space(5.0);
+        ui.label("When set to 'System', the theme follows your desktop's dark/light mode setting.");
+
+        ui.add_space(20.0);
+
+        // Show current effective theme
+        let effective = if self.config.appearance.theme.is_dark() {
+            "Dark"
+        } else {
+            "Light"
+        };
+        ui.horizontal(|ui| {
+            ui.label("Current theme:");
+            ui.strong(effective);
+        });
+    }
+
     fn show_advanced_tab(&mut self, ui: &mut egui::Ui) {
         ui.heading("Advanced Settings");
         ui.add_space(10.0);
@@ -477,6 +542,7 @@ impl eframe::App for PreferencesApp {
                 ui.selectable_value(&mut self.active_tab, Tab::Transcription, "Transcription");
                 ui.selectable_value(&mut self.active_tab, Tab::Audio, "Audio");
                 ui.selectable_value(&mut self.active_tab, Tab::Output, "Output");
+                ui.selectable_value(&mut self.active_tab, Tab::Appearance, "Appearance");
                 ui.selectable_value(&mut self.active_tab, Tab::Advanced, "Advanced");
             });
         });
@@ -510,12 +576,14 @@ impl eframe::App for PreferencesApp {
             });
         });
 
+        let ctx_clone = ctx.clone();
         egui::CentralPanel::default().show(ctx, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| match self.active_tab {
                 Tab::Hotkey => self.show_hotkey_tab(ui),
                 Tab::Transcription => self.show_transcription_tab(ui),
                 Tab::Audio => self.show_audio_tab(ui),
                 Tab::Output => self.show_output_tab(ui),
+                Tab::Appearance => self.show_appearance_tab(ui, &ctx_clone),
                 Tab::Advanced => self.show_advanced_tab(ui),
             });
         });
