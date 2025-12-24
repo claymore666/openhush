@@ -34,7 +34,7 @@ jobs:
 
           # macOS x86_64 (Intel)
           - target: x86_64-apple-darwin
-            os: macos-13
+            os: macos-15-large
             name: macos-x86_64
             cross: false
 
@@ -70,7 +70,12 @@ jobs:
             libasound2-dev \
             libssl-dev \
             pkg-config \
-            libdbus-1-dev
+            libdbus-1-dev \
+            libx11-dev \
+            libxi-dev \
+            libxtst-dev \
+            libxcb1-dev \
+            libxkbcommon-dev
 
       # macOS dependencies
       - name: Install macOS dependencies
@@ -91,10 +96,19 @@ jobs:
 
       # Build (native)
       - name: Build (native)
-        if: '!matrix.cross'
+        if: ${{ !matrix.cross && runner.os != 'macOS' }}
         run: cargo build --release --target ${{ matrix.target }}
-        env:
-          OPENSSL_DIR: ${{ runner.os == 'macOS' && '/opt/homebrew/opt/openssl@3' || '' }}
+
+      - name: Build (native macOS)
+        if: ${{ !matrix.cross && runner.os == 'macOS' }}
+        run: |
+          # Homebrew on ARM is /opt/homebrew, on Intel is /usr/local
+          if [ -d "/opt/homebrew/opt/openssl@3" ]; then
+            export OPENSSL_DIR="/opt/homebrew/opt/openssl@3"
+          else
+            export OPENSSL_DIR="/usr/local/opt/openssl@3"
+          fi
+          cargo build --release --target ${{ matrix.target }}
 
       # Build (cross-compilation)
       - name: Build (cross)

@@ -11,7 +11,11 @@ categories = ["command-line-utilities", "accessibility"]
 
 [features]
 default = []
-cuda = ["whisper-rs/cuda"]
+# GPU acceleration backends (choose one at compile time)
+cuda = ["whisper-rs/cuda"]       # NVIDIA CUDA (Linux, Windows)
+hipblas = ["whisper-rs/hipblas"] # AMD ROCm/HIP (Linux only)
+metal = ["whisper-rs/metal"]     # Apple Metal (macOS only)
+vulkan = ["whisper-rs/vulkan"]   # Vulkan (cross-platform)
 debug-audio = []
 
 [dependencies]

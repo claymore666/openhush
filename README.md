@@ -97,9 +97,22 @@ openhush config --language de       # Set language (or "auto")
 
 | Component | Minimum | Recommended |
 |-----------|---------|-------------|
-| GPU | None (CPU works) | NVIDIA with CUDA |
+| GPU | None (CPU works) | NVIDIA, AMD, or Apple Silicon |
 | RAM | 4 GB | 8 GB |
 | Storage | 500 MB | 4 GB (for large models) |
+
+### GPU Acceleration
+
+GPU acceleration significantly speeds up transcription. OpenHush supports multiple GPU backends:
+
+| GPU | Feature | Platform | Requirements |
+|-----|---------|----------|--------------|
+| NVIDIA | `cuda` | Linux, Windows | CUDA Toolkit 11.x+ |
+| AMD | `hipblas` | Linux | ROCm 5.x+ |
+| Apple Silicon | `metal` | macOS | Built-in (M1/M2/M3) |
+| Any | `vulkan` | All | Vulkan SDK |
+
+Build with your GPU's feature flag (see [Building from Source](#building-from-source)).
 
 ## Platform Support
 
@@ -166,11 +179,24 @@ openhush start -f -v      # Run in foreground with verbose logs
 ```bash
 git clone https://github.com/claymore666/openhush.git
 cd openhush
+
+# CPU only (no GPU acceleration)
 cargo build --release
 
-# With CUDA support
+# NVIDIA GPU (CUDA)
 cargo build --release --features cuda
+
+# AMD GPU (ROCm/HIP)
+cargo build --release --features hipblas
+
+# Apple Silicon (Metal)
+cargo build --release --features metal
+
+# Cross-platform (Vulkan)
+cargo build --release --features vulkan
 ```
+
+**Note:** Only one GPU feature can be enabled at compile time. Choose the one matching your hardware.
 
 ### Linux Dependencies
 
