@@ -173,51 +173,35 @@ impl Platform for LinuxPlatform {
     }
 }
 
-/// Linux system tray implementation using tray-icon crate.
+/// Linux system tray implementation.
 ///
-/// Wraps the existing TrayManager from crate::tray module.
+/// Note: The actual tray is managed by crate::tray::TrayManager in the daemon.
+/// This struct provides a simplified interface for the platform abstraction layer.
 pub struct LinuxSystemTray {
-    tray: Option<crate::tray::TrayManager>,
     status: TrayStatus,
 }
 
 impl SystemTray for LinuxSystemTray {
     fn new() -> Result<Self, PlatformError> {
-        let tray = crate::tray::TrayManager::new()
-            .map_err(|e| PlatformError::Tray(e.to_string()))
-            .ok();
-
+        // The actual tray initialization is handled by TrayManager in the daemon
+        // This is just a placeholder for the platform abstraction
         Ok(Self {
-            tray,
             status: TrayStatus::Idle,
         })
     }
 
     fn set_status(&mut self, status: TrayStatus) {
         self.status = status;
-        if let Some(ref tray) = self.tray {
-            let status_str = match status {
-                TrayStatus::Idle => "Status: Idle",
-                TrayStatus::Recording => "Status: Recording...",
-                TrayStatus::Processing => "Status: Processing...",
-                TrayStatus::Error => "Status: Error",
-            };
-            tray.update_status(status_str);
-        }
+        // Actual status updates are handled by TrayManager
     }
 
     fn poll_event(&mut self) -> Option<TrayMenuEvent> {
-        self.tray.as_ref().and_then(|tray| {
-            tray.try_recv().map(|event| match event {
-                crate::tray::TrayEvent::ShowPreferences => TrayMenuEvent::ShowPreferences,
-                crate::tray::TrayEvent::Quit => TrayMenuEvent::Quit,
-                crate::tray::TrayEvent::StatusClicked => TrayMenuEvent::ShowPreferences,
-            })
-        })
+        // Events are handled by TrayManager in the daemon
+        None
     }
 
     fn is_supported() -> bool {
-        // Check for display server
-        std::env::var("DISPLAY").is_ok() || std::env::var("WAYLAND_DISPLAY").is_ok()
+        // Check for D-Bus session bus (required for ksni)
+        std::env::var("DBUS_SESSION_BUS_ADDRESS").is_ok()
     }
 }

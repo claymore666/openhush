@@ -29,9 +29,6 @@ use thiserror::Error;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
-#[cfg(target_os = "linux")]
-#[allow(clippy::single_component_path_imports)]
-use gtk;
 
 /// Channel buffer size for job and result queues
 const CHANNEL_BUFFER_SIZE: usize = 32;
@@ -359,7 +356,7 @@ impl Daemon {
         // Initialize system tray if enabled (Linux only for now)
         #[cfg(target_os = "linux")]
         let tray: Option<TrayManager> = if enable_tray {
-            match TrayManager::new() {
+            match TrayManager::new().await {
                 Ok(t) => {
                     info!("System tray initialized");
                     Some(t)
@@ -573,17 +570,11 @@ impl Daemon {
                 }
             }
 
-            // Process GTK events and tray (Linux only)
+            // Check for tray events (Linux only)
             #[cfg(target_os = "linux")]
             {
-                // Process GTK events (required for tray icon on Linux)
-                if tray.is_some() {
-                    while gtk::events_pending() {
-                        gtk::main_iteration_do(false);
-                    }
-                }
-
                 // Check for tray events (non-blocking)
+                // Note: ksni handles its own event loop via tokio, we just poll for events
                 if let Some(ref tray) = &tray {
                     if let Some(tray_event) = tray.try_recv() {
                         match tray_event {

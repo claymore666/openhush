@@ -1,20 +1,17 @@
-//! System tray icon and menu.
+//! System tray icon and menu using D-Bus StatusNotifierItem.
 //!
-//! Provides a system tray icon with menu for daemon control.
-//! Gracefully degrades on unsupported platforms (GNOME Wayland, TTY).
+//! Uses the ksni crate for cross-desktop tray support (KDE, GNOME with extensions, etc.)
+//! without requiring GTK dependencies.
 
-use std::sync::mpsc::{self, Receiver};
 use thiserror::Error;
-use tracing::{debug, info, warn};
-use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
-use tray_icon::{TrayIcon, TrayIconBuilder};
 
 #[cfg(target_os = "linux")]
-#[allow(clippy::single_component_path_imports)]
-use gtk;
+mod linux;
+
+#[cfg(target_os = "linux")]
+pub use linux::*;
 
 mod icon;
-
 pub use icon::create_icon;
 
 #[derive(Error, Debug)]
@@ -31,9 +28,8 @@ pub enum TrayError {
     #[error("System tray not supported on this platform")]
     NotSupported,
 
-    #[error("System tray not available (GNOME Wayland without AppIndicator?)")]
-    #[allow(dead_code)]
-    NotAvailable,
+    #[error("D-Bus error: {0}")]
+    DBus(String),
 }
 
 /// Events from the system tray menu
@@ -47,119 +43,32 @@ pub enum TrayEvent {
     StatusClicked,
 }
 
-/// Manages the system tray icon and menu
-pub struct TrayManager {
-    #[allow(dead_code)]
-    tray: TrayIcon,
-    event_rx: Receiver<TrayEvent>,
-    #[allow(dead_code)]
-    status_item_id: tray_icon::menu::MenuId,
+/// Status for tray icon display
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrayStatus {
+    Idle,
+    Recording,
+    Processing,
+    Error,
 }
 
-impl TrayManager {
-    /// Create a new tray manager
-    ///
-    /// Returns an error if the system tray is not available.
-    pub fn new() -> Result<Self, TrayError> {
-        // Check if we're in a TTY (no display)
-        #[cfg(target_os = "linux")]
-        {
-            if std::env::var("DISPLAY").is_err() && std::env::var("WAYLAND_DISPLAY").is_err() {
-                return Err(TrayError::NotSupported);
-            }
-
-            // Initialize GTK (required for tray menus on Linux)
-            if gtk::init().is_err() {
-                warn!("Failed to initialize GTK for system tray");
-                return Err(TrayError::NotSupported);
-            }
+impl TrayStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            TrayStatus::Idle => "Status: Idle",
+            TrayStatus::Recording => "Status: Recording...",
+            TrayStatus::Processing => "Status: Processing...",
+            TrayStatus::Error => "Status: Error",
         }
-
-        let (event_tx, event_rx) = mpsc::channel();
-
-        // Create menu items
-        let status_item = MenuItem::new("Status: Idle", false, None);
-        let status_item_id = status_item.id().clone();
-
-        let preferences_item = MenuItem::new("Preferences...", true, None);
-        let preferences_item_id = preferences_item.id().clone();
-
-        let quit_item = MenuItem::new("Quit", true, None);
-        let quit_item_id = quit_item.id().clone();
-
-        // Build menu
-        let menu = Menu::new();
-        menu.append(&status_item)
-            .map_err(|e| TrayError::MenuCreation(e.to_string()))?;
-        menu.append(&PredefinedMenuItem::separator())
-            .map_err(|e| TrayError::MenuCreation(e.to_string()))?;
-        menu.append(&preferences_item)
-            .map_err(|e| TrayError::MenuCreation(e.to_string()))?;
-        menu.append(&PredefinedMenuItem::separator())
-            .map_err(|e| TrayError::MenuCreation(e.to_string()))?;
-        menu.append(&quit_item)
-            .map_err(|e| TrayError::MenuCreation(e.to_string()))?;
-
-        // Create icon
-        let icon = create_icon().map_err(TrayError::IconCreation)?;
-
-        // Build tray icon
-        let tray = TrayIconBuilder::new()
-            .with_menu(Box::new(menu))
-            .with_tooltip("OpenHush - Voice to Text")
-            .with_icon(icon)
-            .build()
-            .map_err(|e| TrayError::TrayBuild(e.to_string()))?;
-
-        // Set up menu event handler
-        let tx = event_tx.clone();
-        let status_id_for_thread = status_item_id.clone();
-        std::thread::spawn(move || loop {
-            if let Ok(event) = MenuEvent::receiver().recv() {
-                let tray_event = if event.id == preferences_item_id {
-                    Some(TrayEvent::ShowPreferences)
-                } else if event.id == quit_item_id {
-                    Some(TrayEvent::Quit)
-                } else if event.id == status_id_for_thread {
-                    Some(TrayEvent::StatusClicked)
-                } else {
-                    None
-                };
-
-                if let Some(e) = tray_event {
-                    debug!("Tray menu event: {:?}", e);
-                    if tx.send(e).is_err() {
-                        break;
-                    }
-                }
-            }
-        });
-
-        info!("System tray initialized");
-        Ok(Self {
-            tray,
-            event_rx,
-            status_item_id,
-        })
     }
 
-    /// Try to receive a tray event (non-blocking)
-    pub fn try_recv(&self) -> Option<TrayEvent> {
-        self.event_rx.try_recv().ok()
-    }
-
-    /// Get a reference to the event receiver
-    #[allow(dead_code)]
-    pub fn event_receiver(&self) -> &Receiver<TrayEvent> {
-        &self.event_rx
-    }
-
-    /// Update the status text in the menu
-    #[allow(dead_code)]
-    pub fn update_status(&self, status: &str) {
-        // Note: tray-icon doesn't easily support updating menu items after creation
-        // This would require recreating the menu or using platform-specific APIs
-        debug!("Status update requested: {}", status);
+    pub fn icon_name(&self) -> &'static str {
+        match self {
+            TrayStatus::Idle => "audio-input-microphone",
+            TrayStatus::Recording => "media-record",
+            TrayStatus::Processing => "view-refresh",
+            TrayStatus::Error => "dialog-error",
+        }
     }
 }
 
@@ -168,23 +77,8 @@ impl TrayManager {
 pub fn is_tray_supported() -> bool {
     #[cfg(target_os = "linux")]
     {
-        // Check for display server
-        let has_display =
-            std::env::var("DISPLAY").is_ok() || std::env::var("WAYLAND_DISPLAY").is_ok();
-
-        if !has_display {
-            return false;
-        }
-
-        // On GNOME Wayland, tray may not work without AppIndicator extension
-        if let Ok(desktop) = std::env::var("XDG_CURRENT_DESKTOP") {
-            if desktop.to_lowercase().contains("gnome") && std::env::var("WAYLAND_DISPLAY").is_ok()
-            {
-                warn!("GNOME Wayland detected - system tray may require AppIndicator extension");
-            }
-        }
-
-        true
+        // Check for D-Bus session bus
+        std::env::var("DBUS_SESSION_BUS_ADDRESS").is_ok()
     }
 
     #[cfg(not(target_os = "linux"))]

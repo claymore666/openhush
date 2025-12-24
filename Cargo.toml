@@ -80,10 +80,8 @@ notify-rust = "4"
 image = "0.25"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-# GTK for tray initialization
-gtk = "0.18"
-# System tray (Linux only for now)
-tray-icon = "0.19"
+# System tray via D-Bus StatusNotifierItem (no GTK required)
+ksni = "0.3"
 # GUI (preferences window, Linux only for now)
 eframe = "0.29"
 egui = "0.29"

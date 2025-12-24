@@ -1,109 +1,57 @@
-//! Tray icon creation.
+//! Tray icon utilities.
 //!
-//! Creates a simple microphone icon for the system tray.
+//! Provides icon names and utilities for system tray icons.
+//! Uses freedesktop standard icon names for cross-desktop compatibility.
 
-// Allow dx * dx pattern - it's correct for Euclidean distance (dx² + dy²)
-#![allow(clippy::suspicious_operation_groupings)]
+/// Default icon name for the tray (idle state)
+pub const ICON_IDLE: &str = "audio-input-microphone";
 
-use tray_icon::Icon;
+/// Icon name for recording state
+pub const ICON_RECORDING: &str = "media-record";
 
-/// Create the tray icon
+/// Icon name for processing state
+pub const ICON_PROCESSING: &str = "view-refresh";
+
+/// Icon name for error state
+pub const ICON_ERROR: &str = "dialog-error";
+
+/// Create the tray icon (returns icon name for ksni)
 ///
-/// Creates a simple 32x32 microphone icon programmatically.
-pub fn create_icon() -> Result<Icon, String> {
-    // Create a simple 32x32 RGBA icon
-    let size = 32_u32;
-    let mut rgba = vec![0u8; (size * size * 4) as usize];
-
-    // Draw a simple microphone shape
-    let center_x = size / 2;
-    let center_y = size / 2;
-
-    for y in 0..size {
-        for x in 0..size {
-            let idx = ((y * size + x) * 4) as usize;
-
-            // Distance from center
-            let dx = (x as i32 - center_x as i32).abs();
-            let dy = y as i32 - center_y as i32;
-
-            // Microphone body (oval shape in upper portion)
-            let in_mic_body = dx < 8 && dy > -12 && dy < 4;
-
-            // Microphone stand (vertical line)
-            let in_stand = dx < 2 && (4..10).contains(&dy);
-
-            // Microphone base (horizontal line)
-            let in_base = (10..12).contains(&dy) && dx < 8;
-
-            // Microphone arc (curved holder)
-            let arc_radius = 10;
-            let arc_center_y = 6;
-            let dist_to_arc = ((dx * dx + (dy - arc_center_y) * (dy - arc_center_y)) as f32).sqrt();
-            let in_arc = (dist_to_arc - arc_radius as f32).abs() < 2.0
-                && dy > arc_center_y
-                && dy < arc_center_y + 6;
-
-            if in_mic_body || in_stand || in_base || in_arc {
-                // White color with full opacity
-                rgba[idx] = 255; // R
-                rgba[idx + 1] = 255; // G
-                rgba[idx + 2] = 255; // B
-                rgba[idx + 3] = 230; // A (slightly transparent)
-            } else {
-                // Transparent
-                rgba[idx] = 0;
-                rgba[idx + 1] = 0;
-                rgba[idx + 2] = 0;
-                rgba[idx + 3] = 0;
-            }
-        }
-    }
-
-    Icon::from_rgba(rgba, size, size).map_err(|e| e.to_string())
+/// ksni uses freedesktop icon names, so we return the standard
+/// microphone icon name.
+pub fn create_icon() -> Result<String, String> {
+    Ok(ICON_IDLE.to_string())
 }
 
-/// Create a recording indicator icon (red tint)
+/// Create a recording indicator icon name
 #[allow(dead_code)]
-pub fn create_recording_icon() -> Result<Icon, String> {
-    let size = 32_u32;
-    let mut rgba = vec![0u8; (size * size * 4) as usize];
+pub fn create_recording_icon() -> Result<String, String> {
+    Ok(ICON_RECORDING.to_string())
+}
 
-    let center_x = size / 2;
-    let center_y = size / 2;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    for y in 0..size {
-        for x in 0..size {
-            let idx = ((y * size + x) * 4) as usize;
-
-            let dx = (x as i32 - center_x as i32).abs();
-            let dy = y as i32 - center_y as i32;
-
-            let in_mic_body = dx < 8 && dy > -12 && dy < 4;
-            let in_stand = dx < 2 && (4..10).contains(&dy);
-            let in_base = (10..12).contains(&dy) && dx < 8;
-
-            let arc_radius = 10;
-            let arc_center_y = 6;
-            let dist_to_arc = ((dx * dx + (dy - arc_center_y) * (dy - arc_center_y)) as f32).sqrt();
-            let in_arc = (dist_to_arc - arc_radius as f32).abs() < 2.0
-                && dy > arc_center_y
-                && dy < arc_center_y + 6;
-
-            if in_mic_body || in_stand || in_base || in_arc {
-                // Red color for recording
-                rgba[idx] = 255; // R
-                rgba[idx + 1] = 80; // G
-                rgba[idx + 2] = 80; // B
-                rgba[idx + 3] = 255; // A
-            } else {
-                rgba[idx] = 0;
-                rgba[idx + 1] = 0;
-                rgba[idx + 2] = 0;
-                rgba[idx + 3] = 0;
-            }
-        }
+    #[test]
+    fn test_create_icon() {
+        let icon = create_icon();
+        assert!(icon.is_ok());
+        assert_eq!(icon.unwrap(), ICON_IDLE);
     }
 
-    Icon::from_rgba(rgba, size, size).map_err(|e| e.to_string())
+    #[test]
+    fn test_create_recording_icon() {
+        let icon = create_recording_icon();
+        assert!(icon.is_ok());
+        assert_eq!(icon.unwrap(), ICON_RECORDING);
+    }
+
+    #[test]
+    fn test_icon_names_not_empty() {
+        assert!(!ICON_IDLE.is_empty());
+        assert!(!ICON_RECORDING.is_empty());
+        assert!(!ICON_PROCESSING.is_empty());
+        assert!(!ICON_ERROR.is_empty());
+    }
 }
