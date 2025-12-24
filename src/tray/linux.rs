@@ -4,7 +4,7 @@ use super::{TrayError, TrayEvent, TrayStatus};
 use ksni::menu::*;
 use ksni::{Handle, ToolTip, Tray, TrayMethods};
 use std::sync::mpsc::{self, Receiver, Sender};
-use tracing::{debug, error, info};
+use tracing::{debug, info};
 
 /// OpenHush tray implementation
 struct OpenHushTray {
@@ -78,6 +78,7 @@ impl Tray for OpenHushTray {
 
 /// Manages the system tray icon and menu
 pub struct TrayManager {
+    #[allow(dead_code)]
     handle: Handle<OpenHushTray>,
     event_rx: Receiver<TrayEvent>,
 }
@@ -122,6 +123,8 @@ impl TrayManager {
     }
 
     /// Update the status displayed in the tray
+    #[allow(dead_code)]
+    #[allow(clippy::let_underscore_future)]
     pub fn update_status(&self, status: &str) {
         debug!("Updating tray status: {}", status);
         // Map string to TrayStatus
@@ -132,15 +135,21 @@ impl TrayManager {
             _ => TrayStatus::Idle,
         };
 
-        self.handle.update(|tray| {
+        // ksni handle.update() returns a Future, but dropping it is fine
+        // since the update is queued internally by ksni.
+        let _ = self.handle.update(|tray| {
             tray.status = new_status;
         });
     }
 
     /// Set the tray status directly
+    #[allow(dead_code)]
+    #[allow(clippy::let_underscore_future)]
     pub fn set_status(&self, status: TrayStatus) {
         debug!("Setting tray status: {:?}", status);
-        self.handle.update(|tray| {
+        // ksni handle.update() returns a Future, but dropping it is fine
+        // since the update is queued internally by ksni.
+        let _ = self.handle.update(|tray| {
             tray.status = status;
         });
     }

@@ -3,6 +3,8 @@
 //! Provides icon names and utilities for system tray icons.
 //! Uses freedesktop standard icon names for cross-desktop compatibility.
 
+#![allow(dead_code)]
+
 /// Default icon name for the tray (idle state)
 pub const ICON_IDLE: &str = "audio-input-microphone";
 

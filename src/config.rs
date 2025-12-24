@@ -128,19 +128,11 @@ impl Theme {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct AppearanceConfig {
     /// Theme: light, dark, or auto (follow system)
     #[serde(default)]
     pub theme: Theme,
-}
-
-impl Default for AppearanceConfig {
-    fn default() -> Self {
-        Self {
-            theme: Theme::default(),
-        }
-    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

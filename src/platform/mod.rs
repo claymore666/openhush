@@ -24,10 +24,14 @@ pub use macos::MacOSPlatform as CurrentPlatform;
 #[cfg(target_os = "windows")]
 pub use windows::WindowsPlatform as CurrentPlatform;
 
+// System tray types (currently unused, but available for future use)
+#[allow(unused_imports)]
 #[cfg(target_os = "linux")]
 pub use linux::LinuxSystemTray as CurrentSystemTray;
+#[allow(unused_imports)]
 #[cfg(target_os = "macos")]
 pub use macos::MacOSSystemTray as CurrentSystemTray;
+#[allow(unused_imports)]
 #[cfg(target_os = "windows")]
 pub use windows::WindowsSystemTray as CurrentSystemTray;
 
@@ -345,14 +349,20 @@ mod tests {
 
     #[test]
     fn test_tray_menu_event_equality() {
-        assert_eq!(TrayMenuEvent::ShowPreferences, TrayMenuEvent::ShowPreferences);
+        assert_eq!(
+            TrayMenuEvent::ShowPreferences,
+            TrayMenuEvent::ShowPreferences
+        );
         assert_eq!(TrayMenuEvent::Quit, TrayMenuEvent::Quit);
         assert_ne!(TrayMenuEvent::ShowPreferences, TrayMenuEvent::Quit);
     }
 
     #[test]
     fn test_tray_menu_event_debug() {
-        assert_eq!(format!("{:?}", TrayMenuEvent::ShowPreferences), "ShowPreferences");
+        assert_eq!(
+            format!("{:?}", TrayMenuEvent::ShowPreferences),
+            "ShowPreferences"
+        );
         assert_eq!(format!("{:?}", TrayMenuEvent::Quit), "Quit");
     }
 

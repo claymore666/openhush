@@ -65,6 +65,7 @@ enum Tab {
 }
 
 impl PreferencesApp {
+    #[allow(dead_code)]
     fn new() -> Self {
         let config = Config::load().unwrap_or_default();
         Self::with_config(config)

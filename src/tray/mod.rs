@@ -12,9 +12,9 @@ mod linux;
 pub use linux::*;
 
 mod icon;
-pub use icon::create_icon;
 
 #[derive(Error, Debug)]
+#[allow(dead_code)]
 pub enum TrayError {
     #[error("Failed to create tray icon: {0}")]
     IconCreation(String),
@@ -45,6 +45,7 @@ pub enum TrayEvent {
 
 /// Status for tray icon display
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum TrayStatus {
     Idle,
     Recording,
