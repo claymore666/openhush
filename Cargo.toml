@@ -1,6 +1,6 @@
 [package]
 name = "openhush"
-version = "0.3.0"
+version = "0.4.0-dev"
 edition = "2021"
 authors = ["Christian Kamien <christian.kamien@gmail.com>"]
 description = "Open-source voice-to-text that acts as a seamless whisper keyboard"
