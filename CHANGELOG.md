@@ -2,7 +2,21 @@
 
 All notable changes to OpenHush are documented here.
 
-## [Unreleased] - v0.4.0
+## [Unreleased]
+
+### Multi-GPU Support
+
+This release adds support for AMD and Apple Silicon GPUs.
+
+**What's New:**
+
+- **AMD GPU Support** — Build with `--features hipblas` for AMD ROCm/HIP acceleration
+- **Apple Metal Support** — Build with `--features metal` for native Apple Silicon performance
+- **Vulkan Backend** — Build with `--features vulkan` for cross-platform GPU acceleration
+
+---
+
+## [0.4.0] - 2025-12-24
 
 ### Cross-Platform Support
 
