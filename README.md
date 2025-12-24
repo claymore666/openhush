@@ -4,93 +4,211 @@
 
 Press a hotkey, speak, release — your words appear where your cursor is. Powered by local AI, no cloud required.
 
+## Why OpenHush?
+
+- **Privacy first** — Your voice never leaves your computer. No cloud, no subscriptions, no data collection.
+- **Works everywhere** — Type into any application: emails, documents, chat, code editors, terminals.
+- **Fast** — GPU acceleration gives you results in under a second for most dictation.
+- **Accurate** — Uses OpenAI's Whisper models, the same tech behind ChatGPT's voice features.
+- **Free forever** — Open source, MIT licensed. No trials, no premium tiers.
+
 ## Features
 
-- **Push-to-talk** — Hold key to record, release to transcribe
-- **Local processing** — All AI runs on your machine (GPU or CPU)
-- **Auto-paste** — Text appears where your cursor is
-- **LLM correction** — Optional grammar/punctuation fix via Ollama
-- **Cross-platform** — Linux, macOS, Windows
-- **Wayland native** — Full KDE Plasma / GNOME support
-- **Terminal mode** — Works in TTY without X server
-- **Open source** — MIT licensed, no telemetry, no cloud
+### Core Dictation
+- **Push-to-talk** — Hold your hotkey, speak, release. Text appears at your cursor.
+- **Toggle mode** — Press once to start recording, press again to stop.
+- **Auto-paste** — Transcribed text is typed automatically, or copied to clipboard.
+- **Translation** — Speak in any language, get English text (great for multilingual users).
+
+### Smart Processing
+- **Continuous dictation** — Keep talking naturally; OpenHush detects pauses and transcribes automatically.
+- **Noise reduction** — AI-powered background noise removal (keyboard, fans, traffic).
+- **Filler word cleanup** — Removes "um", "uh", "like", "you know" from your speech.
+- **Custom vocabulary** — Add names, jargon, or terms that Whisper gets wrong.
+- **Text snippets** — Expand abbreviations (e.g., "sig" → your email signature).
+
+### Quality Options
+- **Instant mode** — Fastest response, good for quick notes and chat.
+- **Balanced mode** — Best of both worlds (default).
+- **Quality mode** — Most accurate, for important documents.
+
+### User Experience
+- **System tray** — Runs quietly in the background with status indicator.
+- **Preferences GUI** — Point-and-click settings, no config files needed.
+- **Dark mode** — Follows your system theme (or choose manually).
+- **Crash recovery** — If something goes wrong, diagnostic reports help fix it.
 
 ## Quick Start
 
 ```bash
-# Install
+# Install (requires Rust)
 cargo install openhush
 
-# Download model (first time)
-openhush model download large-v3
+# Download a model (first time only)
+openhush model download small
 
-# Start daemon
+# Start the daemon
 openhush start
 
-# Default hotkey: Right Ctrl (hold to record)
+# That's it! Hold Right Ctrl and speak.
 ```
 
-## Requirements
+## Usage
 
-- **GPU (recommended)**: NVIDIA with CUDA drivers
-- **CPU**: Works without GPU (slower)
-- **RAM**: 4-8GB depending on model
-- **Disk**: 75MB - 3GB for model files
+### Basic Commands
 
-## Configuration
+```bash
+openhush start              # Start in background
+openhush stop               # Stop the daemon
+openhush status             # Check if running
+openhush preferences        # Open settings window
+```
 
-Config file: `~/.config/openhush/config.toml`
+### Model Management
+
+```bash
+openhush model list                 # See available models
+openhush model download medium      # Download a model
+openhush model remove tiny          # Delete a model
+```
+
+### Configuration
+
+```bash
+openhush config --show              # View current settings
+openhush config --hotkey F12        # Change hotkey
+openhush config --model large-v3    # Use most accurate model
+openhush config --language de       # Set language (or "auto")
+```
+
+## Choosing a Model
+
+| Model | Download | Speed | Best For |
+|-------|----------|-------|----------|
+| tiny | 75 MB | Instant | Quick notes, chat |
+| base | 142 MB | Very fast | Everyday use |
+| small | 466 MB | Fast | General dictation |
+| medium | 1.5 GB | Moderate | Professional use |
+| large-v3 | 3 GB | Slower | Maximum accuracy |
+
+**Recommendation:** Start with `small`. Upgrade to `medium` or `large-v3` if accuracy matters more than speed.
+
+## System Requirements
+
+| Component | Minimum | Recommended |
+|-----------|---------|-------------|
+| GPU | None (CPU works) | NVIDIA with CUDA |
+| RAM | 4 GB | 8 GB |
+| Storage | 500 MB | 4 GB (for large models) |
+
+## Platform Support
+
+| Platform | Status | Notes |
+|----------|--------|-------|
+| Linux (X11) | ✅ Full | Ubuntu, Fedora, Debian, etc. |
+| Linux (Wayland) | ✅ Full | KDE Plasma, GNOME, Sway |
+| Linux (TTY) | ✅ Full | Terminal-only mode |
+| macOS | ✅ Basic | Intel & Apple Silicon |
+| Windows | ✅ Basic | Windows 10/11 |
+
+## Configuration File
+
+Settings are stored in `~/.config/openhush/config.toml`:
 
 ```toml
 [hotkey]
-key = "ControlRight"
-mode = "push_to_talk"  # or "toggle"
+key = "ControlRight"      # Try: F12, AltRight, etc.
+mode = "push_to_talk"     # or "toggle"
 
 [transcription]
-model = "large-v3"     # tiny, base, small, medium, large-v3
-language = "auto"      # or "en", "de", etc.
-device = "cuda"        # or "cpu"
+preset = "balanced"       # instant, balanced, quality
+language = "auto"         # or "en", "de", "es", etc.
+translate = false         # true = always output English
 
 [output]
-clipboard = true
-paste = true
+clipboard = true          # Copy to clipboard
+paste = true              # Auto-type at cursor
+
+[feedback]
+audio = true              # Beep when recording starts/stops
+visual = true             # Desktop notifications
+
+[appearance]
+theme = "auto"            # auto, light, dark
 
 [correction]
-enabled = false
-ollama_model = "llama3.2:3b"
+enabled = false           # Enable LLM post-processing
+remove_fillers = false    # Remove um, uh, like
 ```
 
-## Platforms
+## Troubleshooting
 
-| Platform | Status | Paste Method |
-|----------|--------|--------------|
-| Linux X11 | ✅ | xdotool/enigo |
-| Linux Wayland | ✅ | wtype |
-| Linux TTY | ✅ | evdev |
-| macOS | 🚧 | CGEvent |
-| Windows | 🚧 | SendInput |
+### Nothing happens when I press the hotkey
+```bash
+openhush status           # Is it running?
+openhush start -f -v      # Run in foreground with verbose logs
+```
+
+### Transcription is slow
+- Try a smaller model: `openhush config --model small`
+- Make sure CUDA is working: check `nvidia-smi`
+
+### Text appears in wrong place
+- Some Wayland apps need `wtype` installed
+- Some X11 apps need `xdotool` installed
+
+### Where are the logs?
+- Main log: `~/.local/share/openhush/openhush.log`
+- Crash reports: `~/.local/share/openhush/crash.log`
 
 ## Building from Source
 
 ```bash
-# Clone
 git clone https://github.com/claymore666/openhush.git
 cd openhush
-
-# Build (release)
 cargo build --release
 
 # With CUDA support
 cargo build --release --features cuda
-
-# Install
-cargo install --path .
 ```
 
-## License
+### Linux Dependencies
 
-MIT License — see [LICENSE](LICENSE)
+```bash
+# Debian/Ubuntu
+sudo apt install libasound2-dev libdbus-1-dev pkg-config
+
+# Fedora
+sudo dnf install alsa-lib-devel dbus-devel
+
+# Arch
+sudo pacman -S alsa-lib dbus
+```
+
+## Roadmap
+
+### Coming Soon
+- Wake word activation ("Hey OpenHush")
+- System audio capture (transcribe meetings)
+- App-specific settings (different config per application)
+- Plugin system for community extensions
+
+### Packaging
+- Flatpak
+- AUR (Arch User Repository)
+- Homebrew (macOS)
+- Chocolatey/winget (Windows)
+
+See the [GitHub milestones](https://github.com/claymore666/openhush/milestones) for detailed plans.
 
 ## Contributing
 
-Contributions welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting PRs.
+Contributions welcome! Please read our contributing guidelines before submitting PRs.
+
+## License
+
+MIT License — see [LICENSE](LICENSE) for details.
+
+---
+
+**OpenHush** is not affiliated with OpenAI. Whisper is OpenAI's open-source speech recognition model.

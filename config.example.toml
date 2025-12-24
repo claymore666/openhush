@@ -1,0 +1,73 @@
+# OpenHush Configuration
+# Copy to ~/.config/openhush/config.toml
+
+# Hotkey settings
+[hotkey]
+# Trigger key for push-to-talk
+# Valid values: ControlRight, ControlLeft, ctrl_r, ctrl_l, F1-F12, Space, etc.
+key = "ControlRight"
+
+# Mode: "push_to_talk" (hold to record) or "toggle" (press to start/stop)
+mode = "push_to_talk"
+
+# Transcription settings
+[transcription]
+# Whisper model: tiny, base, small, medium, large-v3
+# Larger models are more accurate but slower and use more memory
+# Note: "small" is the recommended minimum for reliable multilingual support
+# The "base" model may incorrectly translate instead of transcribe with language=auto
+model = "small"
+
+# Language: "auto" for auto-detection, or ISO code (en, de, fr, etc.)
+language = "auto"
+
+# Device: "cuda" for GPU acceleration, "cpu" for CPU only
+device = "cuda"
+
+# Translate to English: false = transcribe in original language, true = translate to English
+# Note: Whisper can only translate TO English, not other languages
+translate = false
+
+# Output settings
+[output]
+# Copy transcription to clipboard
+clipboard = true
+
+# Paste transcription at cursor position
+paste = true
+
+# LLM correction settings (optional)
+[correction]
+# Enable LLM-based grammar/punctuation correction
+enabled = false
+
+# Ollama API endpoint
+ollama_url = "http://localhost:11434"
+
+# Ollama model for correction
+ollama_model = "llama3.2:3b"
+
+# Feedback settings
+[feedback]
+# Play audio beep on recording start/stop
+audio = true
+
+# Show desktop notification
+visual = true
+
+# Queue settings (for continuous dictation)
+[queue]
+# Maximum pending recordings (0 = unlimited)
+max_pending = 0
+
+# Separator between transcriptions when pasting multiple
+separator = " "
+
+# GPU settings
+[gpu]
+# Auto-detect CUDA GPUs
+auto_detect = true
+
+# Specific GPU device IDs to use (empty = use all available)
+# Example: devices = [0, 1]
+devices = []

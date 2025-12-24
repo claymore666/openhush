@@ -4,13 +4,20 @@
 [advisories]
 db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
-vulnerability = "deny"
-unmaintained = "warn"
+# Unmaintained crates - only warn for workspace deps (direct dependencies)
+unmaintained = "workspace"
+# Yanked crates - warn but don't fail
 yanked = "warn"
-notice = "warn"
+# Ignore known issues from transitive dependencies we can't easily replace
+ignore = [
+    # gtk3-rs is unmaintained but required by tray-icon/libappindicator
+    "RUSTSEC-2024-0415",
+    # glib iterator unsoundness - upstream hasn't released fix compatible with gtk3
+    "RUSTSEC-2024-0429",
+]
 
 [licenses]
-unlicensed = "deny"
+# All licenses are denied unless explicitly listed in allow
 allow = [
     "MIT",
     "Apache-2.0",
@@ -20,10 +27,21 @@ allow = [
     "ISC",
     "Zlib",
     "MPL-2.0",
-    "Unicode-DFS-2016",
+    # Additional OSI-approved licenses from dependencies
+    "BSL-1.0",               # Boost Software License (clipboard-win, error-code)
+    "OFL-1.1",               # SIL Open Font License (epaint_default_fonts)
+    "Unicode-3.0",           # Unicode License v3 (icu_* crates)
+    "NCSA",                  # UIUC/NCSA Open Source License (libfuzzer-sys via rav1e)
+    "Unlicense",             # The Unlicense (whisper-rs, whisper-rs-sys)
+    "CDLA-Permissive-2.0",   # Community Data License (webpki-root-certs)
 ]
-copyleft = "warn"
 confidence-threshold = 0.8
+
+# Clarify licenses for crates with non-standard license expressions
+[[licenses.clarify]]
+name = "epaint_default_fonts"
+expression = "(MIT OR Apache-2.0) AND OFL-1.1"
+license-files = []
 
 [bans]
 multiple-versions = "warn"

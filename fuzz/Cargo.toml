@@ -1,0 +1,46 @@
+[package]
+name = "openhush-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+toml = "0.8"
+
+[dependencies.openhush]
+path = ".."
+
+# Fuzz targets
+
+[[bin]]
+name = "audio_processing"
+path = "fuzz_targets/audio_processing.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ring_buffer"
+path = "fuzz_targets/ring_buffer.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "config_parse"
+path = "fuzz_targets/config_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "audio_validation"
+path = "fuzz_targets/audio_validation.rs"
+test = false
+doc = false
+bench = false

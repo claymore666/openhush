@@ -1,6 +1,6 @@
 [package]
 name = "openhush"
-version = "0.1.0"
+version = "0.4.0"
 edition = "2021"
 authors = ["Christian Kamien <christian.kamien@gmail.com>"]
 description = "Open-source voice-to-text that acts as a seamless whisper keyboard"
@@ -12,13 +12,23 @@ categories = ["command-line-utilities", "accessibility"]
 [features]
 default = []
 cuda = ["whisper-rs/cuda"]
+debug-audio = []
 
 [dependencies]
 # Transcription
 whisper-rs = "0.13"
 
+# Voice Activity Detection (Silero VAD with bundled ONNX)
+silero-vad-rust = "6.2"
+
 # Audio capture
-cpal = "0.15"
+cpal = "0.17"
+
+# High-quality audio resampling
+rubato = "0.16"
+
+# Neural network-based noise reduction (RNNoise)
+nnnoiseless = { version = "0.5", default-features = false }
 
 # Global hotkeys
 rdev = "0.5"
@@ -27,13 +37,14 @@ rdev = "0.5"
 arboard = "3.4"
 
 # Simulated typing (X11/macOS/Windows)
-enigo = "0.2"
+enigo = "0.6"
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 
-# HTTP client for Ollama
-reqwest = { version = "0.12", features = ["json"] }
+# HTTP client for Ollama and model downloads
+reqwest = { version = "0.12", features = ["json", "stream"] }
+futures-util = "0.3"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -44,29 +55,43 @@ clap = { version = "4", features = ["derive"] }
 
 # Logging
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-appender = "0.2"
 
 # Error handling
 thiserror = "2"
 anyhow = "1"
 
+# Time/date for crash reports
+chrono = "0.4"
+
+# System theme detection (dark mode)
+dark-light = "1.1"
+
 # Platform paths (XDG on Linux, native elsewhere)
 directories = "5"
 dirs = "5"
 
-# Unix process management
-[target.'cfg(unix)'.dependencies]
-libc = "0.2"
-
-# Notifications
+# Notifications (cross-platform: Linux, macOS, Windows)
 notify-rust = "4"
 
-# Audio feedback
-rodio = "0.19"
+# Image processing (for tray icon)
+image = "0.25"
+
+# GUI (preferences window)
+eframe = "0.29"
+egui = "0.29"
+
+# Open files/URLs
+open = "5"
+
+# Unix process management
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.29", features = ["signal", "process", "fs"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-# Linux TTY input
-evdev = "0.12"
+# System tray via D-Bus StatusNotifierItem (no GTK required)
+ksni = "0.3"
 
 [dev-dependencies]
 tempfile = "3"

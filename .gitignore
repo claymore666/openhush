@@ -31,3 +31,13 @@ logs/
 # Config with secrets
 config.toml
 !config.example.toml
+
+# Internal docs
+COMPETITORS.md
+AREA_FOR_IMPROVEMENTS.md
+CODEREVIEW.md
+GEMINI.md
+
+# Claude Code
+.claude/
+CLAUDE.md
