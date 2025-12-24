@@ -41,4 +41,6 @@ GEMINI.md
 # Claude Code
 .claude/
 CLAUDE.md
-docs/BOT_ARCHITECTURE_EVALUATION.md
+
+# Internal documentation (docs/ folder is for private notes)
+docs/*.md
