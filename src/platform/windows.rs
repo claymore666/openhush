@@ -3,7 +3,8 @@
 //! Uses SendInput for text input and Win32 APIs for clipboard/notifications.
 
 use super::{
-    AudioFeedback, HotkeyEvent, HotkeyHandler, Notifier, Platform, PlatformError, TextOutput,
+    AudioFeedback, HotkeyEvent, HotkeyHandler, Notifier, Platform, PlatformError, SystemTray,
+    TextOutput, TrayMenuEvent, TrayStatus,
 };
 
 pub struct WindowsPlatform {
@@ -87,5 +88,36 @@ impl Platform for WindowsPlatform {
 
     fn is_tty(&self) -> bool {
         false
+    }
+}
+
+/// Windows system tray implementation (stub).
+///
+/// TODO: Implement using Shell_NotifyIcon or tray-icon crate.
+pub struct WindowsSystemTray {
+    status: TrayStatus,
+}
+
+impl SystemTray for WindowsSystemTray {
+    fn new() -> Result<Self, PlatformError> {
+        // TODO: Implement Windows tray
+        Ok(Self {
+            status: TrayStatus::Idle,
+        })
+    }
+
+    fn set_status(&mut self, status: TrayStatus) {
+        self.status = status;
+        // TODO: Update tray icon/tooltip
+    }
+
+    fn poll_event(&mut self) -> Option<TrayMenuEvent> {
+        // TODO: Implement event polling
+        None
+    }
+
+    fn is_supported() -> bool {
+        // Windows always has system tray support
+        true
     }
 }

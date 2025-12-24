@@ -2,7 +2,7 @@
 
 use super::{
     AudioFeedback, DisplayServer, HotkeyEvent, HotkeyHandler, Notifier, Platform, PlatformError,
-    TextOutput,
+    SystemTray, TextOutput, TrayMenuEvent, TrayStatus,
 };
 use arboard::Clipboard;
 use std::process::Command;
@@ -170,5 +170,54 @@ impl Platform for LinuxPlatform {
 
     fn is_tty(&self) -> bool {
         self.display_server == DisplayServer::Tty
+    }
+}
+
+/// Linux system tray implementation using tray-icon crate.
+///
+/// Wraps the existing TrayManager from crate::tray module.
+pub struct LinuxSystemTray {
+    tray: Option<crate::tray::TrayManager>,
+    status: TrayStatus,
+}
+
+impl SystemTray for LinuxSystemTray {
+    fn new() -> Result<Self, PlatformError> {
+        let tray = crate::tray::TrayManager::new()
+            .map_err(|e| PlatformError::Tray(e.to_string()))
+            .ok();
+
+        Ok(Self {
+            tray,
+            status: TrayStatus::Idle,
+        })
+    }
+
+    fn set_status(&mut self, status: TrayStatus) {
+        self.status = status;
+        if let Some(ref tray) = self.tray {
+            let status_str = match status {
+                TrayStatus::Idle => "Status: Idle",
+                TrayStatus::Recording => "Status: Recording...",
+                TrayStatus::Processing => "Status: Processing...",
+                TrayStatus::Error => "Status: Error",
+            };
+            tray.update_status(status_str);
+        }
+    }
+
+    fn poll_event(&mut self) -> Option<TrayMenuEvent> {
+        self.tray.as_ref().and_then(|tray| {
+            tray.try_recv().map(|event| match event {
+                crate::tray::TrayEvent::ShowPreferences => TrayMenuEvent::ShowPreferences,
+                crate::tray::TrayEvent::Quit => TrayMenuEvent::Quit,
+                crate::tray::TrayEvent::StatusClicked => TrayMenuEvent::ShowPreferences,
+            })
+        })
+    }
+
+    fn is_supported() -> bool {
+        // Check for display server
+        std::env::var("DISPLAY").is_ok() || std::env::var("WAYLAND_DISPLAY").is_ok()
     }
 }

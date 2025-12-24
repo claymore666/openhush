@@ -24,6 +24,13 @@ pub use macos::MacOSPlatform as CurrentPlatform;
 #[cfg(target_os = "windows")]
 pub use windows::WindowsPlatform as CurrentPlatform;
 
+#[cfg(target_os = "linux")]
+pub use linux::LinuxSystemTray as CurrentSystemTray;
+#[cfg(target_os = "macos")]
+pub use macos::MacOSSystemTray as CurrentSystemTray;
+#[cfg(target_os = "windows")]
+pub use windows::WindowsSystemTray as CurrentSystemTray;
+
 #[derive(Error, Debug)]
 pub enum PlatformError {
     #[error("Hotkey error: {0}")]
@@ -114,7 +121,7 @@ pub enum TrayMenuEvent {
 }
 
 /// Trait for platform-specific system tray
-pub trait SystemTray: Send {
+pub trait SystemTray {
     /// Create a new system tray icon
     fn new() -> Result<Self, PlatformError>
     where

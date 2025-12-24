@@ -6,7 +6,8 @@
 //! The enigo crate's CGEventSource is not Send+Sync on macOS.
 
 use super::{
-    AudioFeedback, HotkeyEvent, HotkeyHandler, Notifier, Platform, PlatformError, TextOutput,
+    AudioFeedback, HotkeyEvent, HotkeyHandler, Notifier, Platform, PlatformError, SystemTray,
+    TextOutput, TrayMenuEvent, TrayStatus,
 };
 
 pub struct MacOSPlatform {
@@ -91,5 +92,36 @@ impl Platform for MacOSPlatform {
 
     fn is_tty(&self) -> bool {
         false
+    }
+}
+
+/// macOS system tray implementation (stub).
+///
+/// TODO: Implement using NSStatusItem or tray-icon crate.
+pub struct MacOSSystemTray {
+    status: TrayStatus,
+}
+
+impl SystemTray for MacOSSystemTray {
+    fn new() -> Result<Self, PlatformError> {
+        // TODO: Implement macOS tray
+        Ok(Self {
+            status: TrayStatus::Idle,
+        })
+    }
+
+    fn set_status(&mut self, status: TrayStatus) {
+        self.status = status;
+        // TODO: Update tray icon/tooltip
+    }
+
+    fn poll_event(&mut self) -> Option<TrayMenuEvent> {
+        // TODO: Implement event polling
+        None
+    }
+
+    fn is_supported() -> bool {
+        // macOS always has menu bar support
+        true
     }
 }
