@@ -775,14 +775,14 @@ mod tests {
     #[test]
     fn test_lang_id_all_supported() {
         // Test a sampling of languages across the range
-        assert_eq!(lang_id_to_code(1), "zh");   // chinese
-        assert_eq!(lang_id_to_code(10), "pl");  // polish
-        assert_eq!(lang_id_to_code(20), "he");  // hebrew
-        assert_eq!(lang_id_to_code(30), "th");  // thai
-        assert_eq!(lang_id_to_code(50), "br");  // breton
-        assert_eq!(lang_id_to_code(70), "ka");  // georgian
+        assert_eq!(lang_id_to_code(1), "zh"); // chinese
+        assert_eq!(lang_id_to_code(10), "pl"); // polish
+        assert_eq!(lang_id_to_code(20), "he"); // hebrew
+        assert_eq!(lang_id_to_code(30), "th"); // thai
+        assert_eq!(lang_id_to_code(50), "br"); // breton
+        assert_eq!(lang_id_to_code(70), "ka"); // georgian
         assert_eq!(lang_id_to_code(93), "haw"); // hawaiian
-        assert_eq!(lang_id_to_code(98), "su");  // sundanese
+        assert_eq!(lang_id_to_code(98), "su"); // sundanese
     }
 
     // ===================

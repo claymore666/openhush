@@ -1112,10 +1112,7 @@ mod tests {
         config.vocabulary.path = Some("../../../etc/passwd".to_string());
         let result = config.validate();
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("path traversal"));
+        assert!(result.unwrap_err().to_string().contains("path traversal"));
     }
 
     // ===================
@@ -1200,11 +1197,17 @@ filler_mode = "aggressive"
 
     #[test]
     fn test_filler_removal_mode_default() {
-        assert_eq!(FillerRemovalMode::default(), FillerRemovalMode::Conservative);
+        assert_eq!(
+            FillerRemovalMode::default(),
+            FillerRemovalMode::Conservative
+        );
     }
 
     #[test]
     fn test_transcription_preset_default() {
-        assert_eq!(TranscriptionPreset::default(), TranscriptionPreset::Balanced);
+        assert_eq!(
+            TranscriptionPreset::default(),
+            TranscriptionPreset::Balanced
+        );
     }
 }
