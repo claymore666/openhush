@@ -41,6 +41,9 @@ pub enum PlatformError {
     #[error("Audio error: {0}")]
     Audio(String),
 
+    #[error("Tray error: {0}")]
+    Tray(String),
+
     #[error("Platform not supported: {0}")]
     NotSupported(String),
 }
@@ -86,6 +89,47 @@ pub trait AudioFeedback: Send + Sync {
 
     /// Play a beep sound for recording stop
     fn play_stop_sound(&self) -> Result<(), PlatformError>;
+}
+
+/// System tray status
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrayStatus {
+    /// Idle, ready to record
+    Idle,
+    /// Currently recording
+    Recording,
+    /// Processing transcription
+    Processing,
+    /// Error state
+    Error,
+}
+
+/// Events from the system tray
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TrayMenuEvent {
+    /// User clicked "Preferences..."
+    ShowPreferences,
+    /// User clicked "Quit"
+    Quit,
+}
+
+/// Trait for platform-specific system tray
+pub trait SystemTray: Send {
+    /// Create a new system tray icon
+    fn new() -> Result<Self, PlatformError>
+    where
+        Self: Sized;
+
+    /// Update the tray status (changes icon/tooltip)
+    fn set_status(&mut self, status: TrayStatus);
+
+    /// Poll for menu events (non-blocking)
+    fn poll_event(&mut self) -> Option<TrayMenuEvent>;
+
+    /// Check if tray is supported on this platform
+    fn is_supported() -> bool
+    where
+        Self: Sized;
 }
 
 /// Combined platform interface
@@ -248,6 +292,9 @@ mod tests {
         let err = PlatformError::Audio("audio failed".to_string());
         assert!(err.to_string().contains("Audio error"));
 
+        let err = PlatformError::Tray("tray failed".to_string());
+        assert!(err.to_string().contains("Tray error"));
+
         let err = PlatformError::NotSupported("feature".to_string());
         assert!(err.to_string().contains("not supported"));
     }
@@ -257,5 +304,55 @@ mod tests {
         let err = PlatformError::Hotkey("test".to_string());
         let debug = format!("{:?}", err);
         assert!(debug.contains("Hotkey"));
+    }
+
+    // ===================
+    // TrayStatus Tests
+    // ===================
+
+    #[test]
+    fn test_tray_status_equality() {
+        assert_eq!(TrayStatus::Idle, TrayStatus::Idle);
+        assert_eq!(TrayStatus::Recording, TrayStatus::Recording);
+        assert_ne!(TrayStatus::Idle, TrayStatus::Recording);
+    }
+
+    #[test]
+    fn test_tray_status_debug() {
+        assert_eq!(format!("{:?}", TrayStatus::Idle), "Idle");
+        assert_eq!(format!("{:?}", TrayStatus::Recording), "Recording");
+        assert_eq!(format!("{:?}", TrayStatus::Processing), "Processing");
+        assert_eq!(format!("{:?}", TrayStatus::Error), "Error");
+    }
+
+    #[test]
+    fn test_tray_status_clone() {
+        let status = TrayStatus::Recording;
+        let cloned = status;
+        assert_eq!(status, cloned);
+    }
+
+    // ===================
+    // TrayMenuEvent Tests
+    // ===================
+
+    #[test]
+    fn test_tray_menu_event_equality() {
+        assert_eq!(TrayMenuEvent::ShowPreferences, TrayMenuEvent::ShowPreferences);
+        assert_eq!(TrayMenuEvent::Quit, TrayMenuEvent::Quit);
+        assert_ne!(TrayMenuEvent::ShowPreferences, TrayMenuEvent::Quit);
+    }
+
+    #[test]
+    fn test_tray_menu_event_debug() {
+        assert_eq!(format!("{:?}", TrayMenuEvent::ShowPreferences), "ShowPreferences");
+        assert_eq!(format!("{:?}", TrayMenuEvent::Quit), "Quit");
+    }
+
+    #[test]
+    fn test_tray_menu_event_clone() {
+        let event = TrayMenuEvent::Quit;
+        let cloned = event.clone();
+        assert_eq!(event, cloned);
     }
 }
