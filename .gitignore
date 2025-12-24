@@ -41,3 +41,6 @@ GEMINI.md
 # Claude Code
 .claude/
 CLAUDE.md
+
+# Internal documentation (docs/ folder is for private notes)
+docs/*.md
