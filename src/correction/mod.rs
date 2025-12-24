@@ -170,6 +170,28 @@ mod tests {
         }
     }
 
+    // ===================
+    // TextCorrector Creation Tests
+    // ===================
+
+    #[test]
+    fn test_text_corrector_new() {
+        let config = test_config();
+        let _corrector = TextCorrector::new(config);
+        // Just verify creation doesn't panic
+    }
+
+    #[test]
+    fn test_text_corrector_custom_timeout() {
+        let mut config = test_config();
+        config.timeout_secs = 60;
+        let _corrector = TextCorrector::new(config);
+    }
+
+    // ===================
+    // Prompt Building Tests
+    // ===================
+
     #[test]
     fn test_build_prompt_basic() {
         let config = test_config();
@@ -182,6 +204,20 @@ mod tests {
     }
 
     #[test]
+    fn test_build_prompt_structure() {
+        let config = test_config();
+        let corrector = TextCorrector::new(config);
+        let prompt = corrector.build_prompt("test input");
+
+        // Verify prompt structure
+        assert!(prompt.contains("transcription post-processor"));
+        assert!(prompt.contains("Input: test input"));
+        assert!(prompt.contains("Output:"));
+        assert!(prompt.contains("Preserve the original meaning"));
+        assert!(prompt.contains("Do not add new content"));
+    }
+
+    #[test]
     fn test_build_prompt_with_fillers_conservative() {
         let mut config = test_config();
         config.remove_fillers = true;
@@ -191,6 +227,7 @@ mod tests {
         let prompt = corrector.build_prompt("um hello");
 
         assert!(prompt.contains("um, uh, er"));
+        assert!(!prompt.contains("literally"));
     }
 
     #[test]
@@ -203,6 +240,7 @@ mod tests {
         let prompt = corrector.build_prompt("like hello");
 
         assert!(prompt.contains("you know, basically"));
+        assert!(prompt.contains("I mean"));
     }
 
     #[test]
@@ -215,5 +253,56 @@ mod tests {
         let prompt = corrector.build_prompt("so actually hello");
 
         assert!(prompt.contains("actually, literally"));
+        assert!(prompt.contains("I guess"));
+    }
+
+    #[test]
+    fn test_build_prompt_special_characters() {
+        let config = test_config();
+        let corrector = TextCorrector::new(config);
+        let prompt = corrector.build_prompt("Hello, world! How are you?");
+
+        assert!(prompt.contains("Hello, world! How are you?"));
+    }
+
+    #[test]
+    fn test_build_prompt_multiline() {
+        let config = test_config();
+        let corrector = TextCorrector::new(config);
+        let prompt = corrector.build_prompt("Line 1\nLine 2");
+
+        assert!(prompt.contains("Line 1\nLine 2"));
+    }
+
+    // ===================
+    // Async Tests
+    // ===================
+
+    #[tokio::test]
+    async fn test_correct_empty_string() {
+        let config = test_config();
+        let corrector = TextCorrector::new(config);
+        let result = corrector.correct("").await;
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "");
+    }
+
+    // ===================
+    // Error Tests
+    // ===================
+
+    #[test]
+    fn test_correction_error_display() {
+        let err = CorrectionError::OllamaError("connection failed".to_string());
+        assert!(err.to_string().contains("Ollama"));
+        assert!(err.to_string().contains("connection failed"));
+    }
+
+    #[test]
+    fn test_correction_error_debug() {
+        let err = CorrectionError::OllamaError("test".to_string());
+        let debug = format!("{:?}", err);
+        assert!(debug.contains("OllamaError"));
     }
 }

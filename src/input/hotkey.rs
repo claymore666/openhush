@@ -189,12 +189,17 @@ pub fn parse_key(key_str: &str) -> Result<Key, HotkeyListenerError> {
 mod tests {
     use super::*;
 
+    // ===================
+    // Control Key Tests
+    // ===================
+
     #[test]
     fn test_parse_key_control_right() {
         assert_eq!(parse_key("ControlRight").unwrap(), Key::ControlRight);
         assert_eq!(parse_key("ctrl_r").unwrap(), Key::ControlRight);
         assert_eq!(parse_key("CTRL_R").unwrap(), Key::ControlRight);
         assert_eq!(parse_key("ctrlright").unwrap(), Key::ControlRight);
+        assert_eq!(parse_key("rctrl").unwrap(), Key::ControlRight);
     }
 
     #[test]
@@ -202,13 +207,99 @@ mod tests {
         assert_eq!(parse_key("ControlLeft").unwrap(), Key::ControlLeft);
         assert_eq!(parse_key("ctrl_l").unwrap(), Key::ControlLeft);
         assert_eq!(parse_key("ctrl").unwrap(), Key::ControlLeft);
+        assert_eq!(parse_key("lctrl").unwrap(), Key::ControlLeft);
     }
+
+    // ===================
+    // Alt Key Tests
+    // ===================
+
+    #[test]
+    fn test_parse_key_alt_left() {
+        assert_eq!(parse_key("AltLeft").unwrap(), Key::Alt);
+        assert_eq!(parse_key("alt_l").unwrap(), Key::Alt);
+        assert_eq!(parse_key("alt").unwrap(), Key::Alt);
+        assert_eq!(parse_key("lalt").unwrap(), Key::Alt);
+    }
+
+    #[test]
+    fn test_parse_key_alt_right() {
+        assert_eq!(parse_key("AltRight").unwrap(), Key::AltGr);
+        assert_eq!(parse_key("alt_r").unwrap(), Key::AltGr);
+        assert_eq!(parse_key("altgr").unwrap(), Key::AltGr);
+        assert_eq!(parse_key("ralt").unwrap(), Key::AltGr);
+    }
+
+    // ===================
+    // Shift Key Tests
+    // ===================
+
+    #[test]
+    fn test_parse_key_shift_left() {
+        assert_eq!(parse_key("ShiftLeft").unwrap(), Key::ShiftLeft);
+        assert_eq!(parse_key("shift_l").unwrap(), Key::ShiftLeft);
+        assert_eq!(parse_key("shift").unwrap(), Key::ShiftLeft);
+        assert_eq!(parse_key("lshift").unwrap(), Key::ShiftLeft);
+    }
+
+    #[test]
+    fn test_parse_key_shift_right() {
+        assert_eq!(parse_key("ShiftRight").unwrap(), Key::ShiftRight);
+        assert_eq!(parse_key("shift_r").unwrap(), Key::ShiftRight);
+        assert_eq!(parse_key("rshift").unwrap(), Key::ShiftRight);
+    }
+
+    // ===================
+    // Meta/Super Key Tests
+    // ===================
+
+    #[test]
+    fn test_parse_key_meta_left() {
+        assert_eq!(parse_key("MetaLeft").unwrap(), Key::MetaLeft);
+        assert_eq!(parse_key("superleft").unwrap(), Key::MetaLeft);
+        assert_eq!(parse_key("winleft").unwrap(), Key::MetaLeft);
+        assert_eq!(parse_key("lsuper").unwrap(), Key::MetaLeft);
+        assert_eq!(parse_key("lmeta").unwrap(), Key::MetaLeft);
+        assert_eq!(parse_key("lwin").unwrap(), Key::MetaLeft);
+    }
+
+    #[test]
+    fn test_parse_key_meta_right() {
+        assert_eq!(parse_key("MetaRight").unwrap(), Key::MetaRight);
+        assert_eq!(parse_key("superright").unwrap(), Key::MetaRight);
+        assert_eq!(parse_key("winright").unwrap(), Key::MetaRight);
+        assert_eq!(parse_key("rsuper").unwrap(), Key::MetaRight);
+    }
+
+    // ===================
+    // Function Key Tests
+    // ===================
 
     #[test]
     fn test_parse_key_function_keys() {
         assert_eq!(parse_key("F1").unwrap(), Key::F1);
         assert_eq!(parse_key("f12").unwrap(), Key::F12);
     }
+
+    #[test]
+    fn test_parse_key_all_function_keys() {
+        assert_eq!(parse_key("f1").unwrap(), Key::F1);
+        assert_eq!(parse_key("f2").unwrap(), Key::F2);
+        assert_eq!(parse_key("f3").unwrap(), Key::F3);
+        assert_eq!(parse_key("f4").unwrap(), Key::F4);
+        assert_eq!(parse_key("f5").unwrap(), Key::F5);
+        assert_eq!(parse_key("f6").unwrap(), Key::F6);
+        assert_eq!(parse_key("f7").unwrap(), Key::F7);
+        assert_eq!(parse_key("f8").unwrap(), Key::F8);
+        assert_eq!(parse_key("f9").unwrap(), Key::F9);
+        assert_eq!(parse_key("f10").unwrap(), Key::F10);
+        assert_eq!(parse_key("f11").unwrap(), Key::F11);
+        assert_eq!(parse_key("f12").unwrap(), Key::F12);
+    }
+
+    // ===================
+    // Special Key Tests
+    // ===================
 
     #[test]
     fn test_parse_key_special() {
@@ -218,8 +309,118 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_key_all_special() {
+        assert_eq!(parse_key("space").unwrap(), Key::Space);
+        assert_eq!(parse_key("tab").unwrap(), Key::Tab);
+        assert_eq!(parse_key("capslock").unwrap(), Key::CapsLock);
+        assert_eq!(parse_key("caps").unwrap(), Key::CapsLock);
+        assert_eq!(parse_key("backspace").unwrap(), Key::Backspace);
+        assert_eq!(parse_key("back").unwrap(), Key::Backspace);
+        assert_eq!(parse_key("enter").unwrap(), Key::Return);
+        assert_eq!(parse_key("return").unwrap(), Key::Return);
+    }
+
+    // ===================
+    // Case Insensitivity Tests
+    // ===================
+
+    #[test]
+    fn test_parse_key_case_insensitive() {
+        assert_eq!(parse_key("SPACE").unwrap(), Key::Space);
+        assert_eq!(parse_key("Space").unwrap(), Key::Space);
+        assert_eq!(parse_key("space").unwrap(), Key::Space);
+        assert_eq!(parse_key("CONTROLRIGHT").unwrap(), Key::ControlRight);
+    }
+
+    // ===================
+    // Normalization Tests
+    // ===================
+
+    #[test]
+    fn test_parse_key_with_underscores() {
+        assert_eq!(parse_key("control_right").unwrap(), Key::ControlRight);
+        assert_eq!(parse_key("ctrl_r").unwrap(), Key::ControlRight);
+    }
+
+    #[test]
+    fn test_parse_key_with_dashes() {
+        assert_eq!(parse_key("control-right").unwrap(), Key::ControlRight);
+        assert_eq!(parse_key("ctrl-r").unwrap(), Key::ControlRight);
+    }
+
+    // ===================
+    // Invalid Key Tests
+    // ===================
+
+    #[test]
     fn test_parse_key_invalid() {
         assert!(parse_key("invalid_key").is_err());
         assert!(parse_key("").is_err());
+    }
+
+    #[test]
+    fn test_parse_key_invalid_error_message() {
+        let result = parse_key("invalid_key");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("Unknown key"));
+        assert!(err.to_string().contains("invalid_key"));
+    }
+
+    // ===================
+    // HotkeyEvent Tests
+    // ===================
+
+    #[test]
+    fn test_hotkey_event_equality() {
+        assert_eq!(HotkeyEvent::Pressed, HotkeyEvent::Pressed);
+        assert_eq!(HotkeyEvent::Released, HotkeyEvent::Released);
+        assert_ne!(HotkeyEvent::Pressed, HotkeyEvent::Released);
+    }
+
+    #[test]
+    fn test_hotkey_event_debug() {
+        assert_eq!(format!("{:?}", HotkeyEvent::Pressed), "Pressed");
+        assert_eq!(format!("{:?}", HotkeyEvent::Released), "Released");
+    }
+
+    #[test]
+    fn test_hotkey_event_clone() {
+        let event = HotkeyEvent::Pressed;
+        let cloned = event;
+        assert_eq!(event, cloned);
+    }
+
+    // ===================
+    // Error Tests
+    // ===================
+
+    #[test]
+    fn test_hotkey_listener_error_display() {
+        let err = HotkeyListenerError::InvalidHotkey("test".to_string());
+        assert!(err.to_string().contains("Invalid hotkey"));
+        assert!(err.to_string().contains("test"));
+
+        let err = HotkeyListenerError::StartFailed("failed".to_string());
+        assert!(err.to_string().contains("Failed to start"));
+
+        let err = HotkeyListenerError::ListenerStopped;
+        assert!(err.to_string().contains("stopped unexpectedly"));
+    }
+
+    // ===================
+    // HotkeyListener Creation Tests
+    // ===================
+
+    #[test]
+    fn test_hotkey_listener_new_valid() {
+        let result = HotkeyListener::new("ControlRight");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_hotkey_listener_new_invalid() {
+        let result = HotkeyListener::new("invalid_key_xyz");
+        assert!(result.is_err());
     }
 }

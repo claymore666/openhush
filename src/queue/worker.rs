@@ -189,3 +189,135 @@ pub fn spawn_worker(
             worker.run();
         })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ===================
+    // Audio Preprocessing Tests
+    // ===================
+
+    fn test_audio_config_disabled() -> AudioConfig {
+        AudioConfig {
+            prebuffer_duration_secs: 30.0,
+            resampling_quality: crate::config::ResamplingQuality::High,
+            preprocessing: false,
+            normalization: crate::config::NormalizationConfig::default(),
+            compression: crate::config::CompressionConfig::default(),
+            limiter: crate::config::LimiterConfig::default(),
+            noise_reduction: crate::config::NoiseReductionConfig::default(),
+        }
+    }
+
+    fn test_audio_config_enabled() -> AudioConfig {
+        AudioConfig {
+            prebuffer_duration_secs: 30.0,
+            resampling_quality: crate::config::ResamplingQuality::High,
+            preprocessing: true,
+            normalization: crate::config::NormalizationConfig {
+                enabled: true,
+                target_db: -18.0,
+            },
+            compression: crate::config::CompressionConfig {
+                enabled: true,
+                threshold_db: -24.0,
+                ratio: 4.0,
+                attack_ms: 5.0,
+                release_ms: 50.0,
+                makeup_gain_db: 6.0,
+            },
+            limiter: crate::config::LimiterConfig {
+                enabled: true,
+                ceiling_db: -1.0,
+                release_ms: 50.0,
+            },
+            noise_reduction: crate::config::NoiseReductionConfig::default(),
+        }
+    }
+
+    #[test]
+    fn test_preprocess_audio_disabled() {
+        let config = test_audio_config_disabled();
+        let mut buffer = AudioBuffer {
+            samples: vec![0.1, 0.2, 0.3, 0.4, 0.5],
+            sample_rate: 16000,
+        };
+        let original = buffer.samples.clone();
+
+        TranscriptionWorker::preprocess_audio(&mut buffer, &config);
+
+        // With preprocessing disabled, samples should be unchanged
+        assert_eq!(buffer.samples, original);
+    }
+
+    #[test]
+    fn test_preprocess_audio_enabled() {
+        let config = test_audio_config_enabled();
+        let mut buffer = AudioBuffer {
+            samples: vec![0.1, 0.2, 0.3, 0.4, 0.5],
+            sample_rate: 16000,
+        };
+        let original = buffer.samples.clone();
+
+        TranscriptionWorker::preprocess_audio(&mut buffer, &config);
+
+        // With preprocessing enabled, samples should be modified
+        // (normalization, compression, limiting)
+        assert_ne!(buffer.samples, original);
+    }
+
+    #[test]
+    fn test_preprocess_audio_with_noise_reduction() {
+        let mut config = test_audio_config_disabled();
+        config.noise_reduction.enabled = true;
+        config.noise_reduction.strength = 0.5;
+
+        let mut buffer = AudioBuffer {
+            samples: vec![0.1, 0.2, 0.3, 0.4, 0.5],
+            sample_rate: 16000,
+        };
+
+        // This should run without panicking
+        TranscriptionWorker::preprocess_audio(&mut buffer, &config);
+    }
+
+    #[test]
+    fn test_preprocess_audio_empty_buffer() {
+        let config = test_audio_config_enabled();
+        let mut buffer = AudioBuffer {
+            samples: vec![],
+            sample_rate: 16000,
+        };
+
+        // Should not panic on empty buffer
+        TranscriptionWorker::preprocess_audio(&mut buffer, &config);
+        assert!(buffer.samples.is_empty());
+    }
+
+    #[test]
+    fn test_preprocess_audio_silence() {
+        let config = test_audio_config_enabled();
+        let mut buffer = AudioBuffer {
+            samples: vec![0.0; 1000],
+            sample_rate: 16000,
+        };
+
+        // Should not panic on silence
+        TranscriptionWorker::preprocess_audio(&mut buffer, &config);
+    }
+
+    #[test]
+    fn test_preprocess_audio_preserves_sample_rate() {
+        let config = test_audio_config_enabled();
+        let mut buffer = AudioBuffer {
+            samples: vec![0.1, 0.2, 0.3],
+            sample_rate: 16000,
+        };
+
+        TranscriptionWorker::preprocess_audio(&mut buffer, &config);
+
+        // Sample rate should be unchanged
+        assert_eq!(buffer.sample_rate, 16000);
+    }
+}

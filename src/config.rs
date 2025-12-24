@@ -851,3 +851,360 @@ pub fn update(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ===================
+    // Default Value Tests
+    // ===================
+
+    #[test]
+    fn test_default_config() {
+        let config = Config::default();
+        assert_eq!(config.hotkey.key, "ControlRight");
+        assert_eq!(config.hotkey.mode, "push_to_talk");
+        assert_eq!(config.transcription.preset, TranscriptionPreset::Balanced);
+        assert_eq!(config.transcription.model, "large-v3");
+        assert_eq!(config.transcription.language, "auto");
+        assert_eq!(config.transcription.device, "cuda");
+        assert!(!config.transcription.translate);
+        assert!(config.output.clipboard);
+        assert!(config.output.paste);
+        assert!(!config.correction.enabled);
+        assert!(config.feedback.audio);
+        assert!(config.feedback.visual);
+    }
+
+    #[test]
+    fn test_default_audio_config() {
+        let config = AudioConfig::default();
+        assert!((config.prebuffer_duration_secs - 30.0).abs() < 0.01);
+        assert_eq!(config.resampling_quality, ResamplingQuality::High);
+        assert!(!config.preprocessing);
+        assert!(config.normalization.enabled);
+        assert!(config.compression.enabled);
+        assert!(config.limiter.enabled);
+    }
+
+    #[test]
+    fn test_default_queue_config() {
+        let config = QueueConfig::default();
+        assert_eq!(config.max_pending, 10);
+        assert_eq!(config.high_water_mark, 8);
+        assert_eq!(config.backpressure_strategy, BackpressureStrategy::Warn);
+        assert!(!config.notify_on_backpressure);
+        assert_eq!(config.separator, " ");
+        assert!((config.chunk_interval_secs - 0.0).abs() < 0.01);
+        assert!((config.chunk_safety_margin - 0.2).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_default_noise_reduction_config() {
+        let config = NoiseReductionConfig::default();
+        assert!(!config.enabled);
+        assert!((config.strength - 1.0).abs() < 0.01);
+    }
+
+    // ===================
+    // Transcription Preset Tests
+    // ===================
+
+    #[test]
+    fn test_transcription_preset_models() {
+        assert_eq!(TranscriptionPreset::Instant.model(), "small");
+        assert_eq!(TranscriptionPreset::Balanced.model(), "medium");
+        assert_eq!(TranscriptionPreset::Quality.model(), "large-v3");
+        assert_eq!(TranscriptionPreset::Custom.model(), "base");
+    }
+
+    #[test]
+    fn test_effective_model_with_preset() {
+        let mut config = TranscriptionConfig::default();
+
+        config.preset = TranscriptionPreset::Instant;
+        assert_eq!(config.effective_model(), "small");
+
+        config.preset = TranscriptionPreset::Balanced;
+        assert_eq!(config.effective_model(), "medium");
+
+        config.preset = TranscriptionPreset::Quality;
+        assert_eq!(config.effective_model(), "large-v3");
+    }
+
+    #[test]
+    fn test_effective_model_custom() {
+        let mut config = TranscriptionConfig::default();
+        config.preset = TranscriptionPreset::Custom;
+        config.model = "tiny".to_string();
+        assert_eq!(config.effective_model(), "tiny");
+    }
+
+    // ===================
+    // Validation Tests
+    // ===================
+
+    #[test]
+    fn test_validate_valid_config() {
+        let config = Config::default();
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_prebuffer_too_low() {
+        let mut config = Config::default();
+        config.audio.prebuffer_duration_secs = 0.0;
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("prebuffer_duration_secs must be positive"));
+    }
+
+    #[test]
+    fn test_validate_prebuffer_negative() {
+        let mut config = Config::default();
+        config.audio.prebuffer_duration_secs = -1.0;
+        let result = config.validate();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_prebuffer_too_high() {
+        let mut config = Config::default();
+        config.audio.prebuffer_duration_secs = 500.0;
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("cannot exceed 300 seconds"));
+    }
+
+    #[test]
+    fn test_validate_chunk_safety_margin_valid() {
+        let mut config = Config::default();
+        config.queue.chunk_safety_margin = 0.5;
+        assert!(config.validate().is_ok());
+
+        config.queue.chunk_safety_margin = 0.0;
+        assert!(config.validate().is_ok());
+
+        config.queue.chunk_safety_margin = 2.0;
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_chunk_safety_margin_invalid() {
+        let mut config = Config::default();
+
+        config.queue.chunk_safety_margin = -0.1;
+        assert!(config.validate().is_err());
+
+        config.queue.chunk_safety_margin = 2.5;
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_model_path_traversal() {
+        let mut config = Config::default();
+
+        config.transcription.model = "../../../etc/passwd".to_string();
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("invalid characters"));
+
+        config.transcription.model = "models/base".to_string();
+        let result = config.validate();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_normalization_target() {
+        let mut config = Config::default();
+
+        // Valid: negative dB
+        config.audio.normalization.target_db = -18.0;
+        assert!(config.validate().is_ok());
+
+        // Invalid: positive dB
+        config.audio.normalization.target_db = 5.0;
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_compression_ratio() {
+        let mut config = Config::default();
+
+        // Valid: >= 1.0
+        config.audio.compression.ratio = 4.0;
+        assert!(config.validate().is_ok());
+
+        config.audio.compression.ratio = 1.0;
+        assert!(config.validate().is_ok());
+
+        // Invalid: < 1.0
+        config.audio.compression.ratio = 0.5;
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_limiter_ceiling() {
+        let mut config = Config::default();
+
+        // Valid: negative dB
+        config.audio.limiter.ceiling_db = -1.0;
+        assert!(config.validate().is_ok());
+
+        // Invalid: positive dB
+        config.audio.limiter.ceiling_db = 1.0;
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_noise_reduction_strength() {
+        let mut config = Config::default();
+
+        // Valid: 0.0 to 1.0
+        config.audio.noise_reduction.strength = 0.0;
+        assert!(config.validate().is_ok());
+
+        config.audio.noise_reduction.strength = 0.5;
+        assert!(config.validate().is_ok());
+
+        config.audio.noise_reduction.strength = 1.0;
+        assert!(config.validate().is_ok());
+
+        // Invalid: < 0.0 or > 1.0
+        config.audio.noise_reduction.strength = -0.1;
+        assert!(config.validate().is_err());
+
+        config.audio.noise_reduction.strength = 1.5;
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_vad_threshold() {
+        let mut config = Config::default();
+
+        // Valid: 0.0 to 1.0
+        config.vad.threshold = 0.5;
+        assert!(config.validate().is_ok());
+
+        // Invalid
+        config.vad.threshold = -0.1;
+        assert!(config.validate().is_err());
+
+        config.vad.threshold = 1.5;
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_vocabulary_path_traversal() {
+        let mut config = Config::default();
+
+        // Path traversal attempt
+        config.vocabulary.path = Some("../../../etc/passwd".to_string());
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("path traversal"));
+    }
+
+    // ===================
+    // TOML Parsing Tests
+    // ===================
+
+    #[test]
+    fn test_parse_minimal_toml() {
+        let toml_str = "";
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.hotkey.key, "ControlRight");
+    }
+
+    #[test]
+    fn test_parse_partial_toml() {
+        let toml_str = r#"
+[hotkey]
+key = "F12"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.hotkey.key, "F12");
+        assert_eq!(config.hotkey.mode, "push_to_talk"); // Default
+    }
+
+    #[test]
+    fn test_parse_transcription_preset() {
+        let toml_str = r#"
+[transcription]
+preset = "instant"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.transcription.preset, TranscriptionPreset::Instant);
+    }
+
+    #[test]
+    fn test_parse_backpressure_strategy() {
+        let toml_str = r#"
+[queue]
+backpressure_strategy = "drop_oldest"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(
+            config.queue.backpressure_strategy,
+            BackpressureStrategy::DropOldest
+        );
+    }
+
+    #[test]
+    fn test_parse_filler_mode() {
+        let toml_str = r#"
+[correction]
+filler_mode = "aggressive"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.correction.filler_mode, FillerRemovalMode::Aggressive);
+    }
+
+    #[test]
+    fn test_serialize_and_deserialize_roundtrip() {
+        let config = Config::default();
+        let toml_str = toml::to_string_pretty(&config).unwrap();
+        let parsed: Config = toml::from_str(&toml_str).unwrap();
+
+        assert_eq!(config.hotkey.key, parsed.hotkey.key);
+        assert_eq!(config.transcription.model, parsed.transcription.model);
+        assert_eq!(config.output.clipboard, parsed.output.clipboard);
+    }
+
+    // ===================
+    // Enum Tests
+    // ===================
+
+    #[test]
+    fn test_resampling_quality_default() {
+        assert_eq!(ResamplingQuality::default(), ResamplingQuality::High);
+    }
+
+    #[test]
+    fn test_backpressure_strategy_default() {
+        assert_eq!(BackpressureStrategy::default(), BackpressureStrategy::Warn);
+    }
+
+    #[test]
+    fn test_filler_removal_mode_default() {
+        assert_eq!(FillerRemovalMode::default(), FillerRemovalMode::Conservative);
+    }
+
+    #[test]
+    fn test_transcription_preset_default() {
+        assert_eq!(TranscriptionPreset::default(), TranscriptionPreset::Balanced);
+    }
+}

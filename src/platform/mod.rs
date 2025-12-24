@@ -142,3 +142,120 @@ impl DisplayServer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ===================
+    // DisplayServer Tests
+    // ===================
+
+    #[test]
+    fn test_display_server_equality() {
+        assert_eq!(DisplayServer::X11, DisplayServer::X11);
+        assert_eq!(DisplayServer::Wayland, DisplayServer::Wayland);
+        assert_ne!(DisplayServer::X11, DisplayServer::Wayland);
+    }
+
+    #[test]
+    fn test_display_server_debug() {
+        let server = DisplayServer::X11;
+        let debug = format!("{:?}", server);
+        assert_eq!(debug, "X11");
+
+        let server = DisplayServer::Wayland;
+        let debug = format!("{:?}", server);
+        assert_eq!(debug, "Wayland");
+    }
+
+    #[test]
+    fn test_display_server_clone() {
+        let server = DisplayServer::MacOS;
+        let cloned = server;
+        assert_eq!(server, cloned);
+    }
+
+    #[test]
+    fn test_display_server_all_variants() {
+        let _x11 = DisplayServer::X11;
+        let _wayland = DisplayServer::Wayland;
+        let _windows = DisplayServer::Windows;
+        let _macos = DisplayServer::MacOS;
+        let _tty = DisplayServer::Tty;
+        let _unknown = DisplayServer::Unknown;
+    }
+
+    // DisplayServer::detect() depends on environment variables,
+    // so we can only test that it returns a valid variant
+    #[test]
+    fn test_display_server_detect_returns_valid() {
+        let server = DisplayServer::detect();
+        // Just verify it's one of the valid variants
+        match server {
+            DisplayServer::X11
+            | DisplayServer::Wayland
+            | DisplayServer::Windows
+            | DisplayServer::MacOS
+            | DisplayServer::Tty
+            | DisplayServer::Unknown => {}
+        }
+    }
+
+    // ===================
+    // HotkeyEvent Tests
+    // ===================
+
+    #[test]
+    fn test_hotkey_event_equality() {
+        assert_eq!(HotkeyEvent::Pressed, HotkeyEvent::Pressed);
+        assert_eq!(HotkeyEvent::Released, HotkeyEvent::Released);
+        assert_ne!(HotkeyEvent::Pressed, HotkeyEvent::Released);
+    }
+
+    #[test]
+    fn test_hotkey_event_debug() {
+        assert_eq!(format!("{:?}", HotkeyEvent::Pressed), "Pressed");
+        assert_eq!(format!("{:?}", HotkeyEvent::Released), "Released");
+    }
+
+    #[test]
+    fn test_hotkey_event_clone() {
+        let event = HotkeyEvent::Pressed;
+        let cloned = event;
+        assert_eq!(event, cloned);
+    }
+
+    // ===================
+    // PlatformError Tests
+    // ===================
+
+    #[test]
+    fn test_platform_error_display() {
+        let err = PlatformError::Hotkey("key error".to_string());
+        assert!(err.to_string().contains("Hotkey error"));
+        assert!(err.to_string().contains("key error"));
+
+        let err = PlatformError::Paste("paste failed".to_string());
+        assert!(err.to_string().contains("Paste error"));
+
+        let err = PlatformError::Clipboard("copy failed".to_string());
+        assert!(err.to_string().contains("Clipboard error"));
+
+        let err = PlatformError::Notification("notify failed".to_string());
+        assert!(err.to_string().contains("Notification error"));
+
+        let err = PlatformError::Audio("audio failed".to_string());
+        assert!(err.to_string().contains("Audio error"));
+
+        let err = PlatformError::NotSupported("feature".to_string());
+        assert!(err.to_string().contains("not supported"));
+    }
+
+    #[test]
+    fn test_platform_error_debug() {
+        let err = PlatformError::Hotkey("test".to_string());
+        let debug = format!("{:?}", err);
+        assert!(debug.contains("Hotkey"));
+    }
+}

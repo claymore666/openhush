@@ -153,8 +153,86 @@ pub fn detect_paste_method() -> PasteMethod {
 mod tests {
     use super::*;
 
+    // ===================
+    // PasteMethod Tests
+    // ===================
+
     #[test]
     fn test_paste_method_default() {
         assert_eq!(PasteMethod::default(), PasteMethod::Type);
+    }
+
+    #[test]
+    fn test_paste_method_equality() {
+        assert_eq!(PasteMethod::Type, PasteMethod::Type);
+        assert_eq!(PasteMethod::CtrlV, PasteMethod::CtrlV);
+        assert_eq!(PasteMethod::Xdotool, PasteMethod::Xdotool);
+        assert_ne!(PasteMethod::Type, PasteMethod::CtrlV);
+    }
+
+    #[test]
+    fn test_paste_method_debug() {
+        assert_eq!(format!("{:?}", PasteMethod::Type), "Type");
+        assert_eq!(format!("{:?}", PasteMethod::CtrlV), "CtrlV");
+        assert_eq!(format!("{:?}", PasteMethod::Xdotool), "Xdotool");
+    }
+
+    #[test]
+    fn test_paste_method_clone() {
+        let method = PasteMethod::Type;
+        let cloned = method;
+        assert_eq!(method, cloned);
+    }
+
+    // ===================
+    // detect_paste_method Tests
+    // ===================
+
+    #[test]
+    fn test_detect_paste_method() {
+        // Currently always returns Type
+        let method = detect_paste_method();
+        assert_eq!(method, PasteMethod::Type);
+    }
+
+    // ===================
+    // PasteError Tests
+    // ===================
+
+    #[test]
+    fn test_paste_error_display() {
+        let err = PasteError::InitFailed("init error".to_string());
+        assert!(err.to_string().contains("initialize"));
+        assert!(err.to_string().contains("init error"));
+
+        let err = PasteError::TypeFailed("type error".to_string());
+        assert!(err.to_string().contains("type text"));
+
+        let err = PasteError::MethodNotAvailable("xdotool".to_string());
+        assert!(err.to_string().contains("not available"));
+    }
+
+    #[test]
+    fn test_paste_error_debug() {
+        let err = PasteError::InitFailed("test".to_string());
+        let debug = format!("{:?}", err);
+        assert!(debug.contains("InitFailed"));
+    }
+
+    // ===================
+    // Xdotool Platform Tests
+    // ===================
+
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn test_xdotool_not_available_non_linux() {
+        let result = paste_by_xdotool("test");
+        assert!(result.is_err());
+        match result {
+            Err(PasteError::MethodNotAvailable(msg)) => {
+                assert!(msg.contains("Linux"));
+            }
+            _ => panic!("Expected MethodNotAvailable error"),
+        }
     }
 }

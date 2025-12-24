@@ -642,6 +642,10 @@ fn lang_id_to_code(id: std::ffi::c_int) -> &'static str {
 mod tests {
     use super::*;
 
+    // ===================
+    // Model FromStr Tests
+    // ===================
+
     #[test]
     fn test_model_from_str() {
         assert_eq!("tiny".parse(), Ok(WhisperModel::Tiny));
@@ -650,8 +654,199 @@ mod tests {
     }
 
     #[test]
+    fn test_model_from_str_all_variants() {
+        assert_eq!("tiny".parse(), Ok(WhisperModel::Tiny));
+        assert_eq!("base".parse(), Ok(WhisperModel::Base));
+        assert_eq!("small".parse(), Ok(WhisperModel::Small));
+        assert_eq!("medium".parse(), Ok(WhisperModel::Medium));
+        assert_eq!("large".parse(), Ok(WhisperModel::LargeV3));
+        assert_eq!("large-v3".parse(), Ok(WhisperModel::LargeV3));
+        assert_eq!("largev3".parse(), Ok(WhisperModel::LargeV3));
+    }
+
+    #[test]
+    fn test_model_from_str_case_insensitive() {
+        assert_eq!("TINY".parse(), Ok(WhisperModel::Tiny));
+        assert_eq!("Medium".parse(), Ok(WhisperModel::Medium));
+        assert_eq!("LARGE-V3".parse(), Ok(WhisperModel::LargeV3));
+    }
+
+    // ===================
+    // Model Filename Tests
+    // ===================
+
+    #[test]
     fn test_model_filename() {
         assert_eq!(WhisperModel::Tiny.filename(), "ggml-tiny.bin");
         assert_eq!(WhisperModel::LargeV3.filename(), "ggml-large-v3.bin");
+    }
+
+    #[test]
+    fn test_model_filename_all() {
+        assert_eq!(WhisperModel::Tiny.filename(), "ggml-tiny.bin");
+        assert_eq!(WhisperModel::Base.filename(), "ggml-base.bin");
+        assert_eq!(WhisperModel::Small.filename(), "ggml-small.bin");
+        assert_eq!(WhisperModel::Medium.filename(), "ggml-medium.bin");
+        assert_eq!(WhisperModel::LargeV3.filename(), "ggml-large-v3.bin");
+    }
+
+    // ===================
+    // Model Size Tests
+    // ===================
+
+    #[test]
+    fn test_model_size_bytes() {
+        assert_eq!(WhisperModel::Tiny.size_bytes(), 75_000_000);
+        assert_eq!(WhisperModel::Base.size_bytes(), 142_000_000);
+        assert_eq!(WhisperModel::Small.size_bytes(), 466_000_000);
+        assert_eq!(WhisperModel::Medium.size_bytes(), 1_500_000_000);
+        assert_eq!(WhisperModel::LargeV3.size_bytes(), 3_000_000_000);
+    }
+
+    #[test]
+    fn test_model_size_bytes_function() {
+        assert_eq!(model_size_bytes(WhisperModel::Tiny), 75_000_000);
+        assert_eq!(model_size_bytes(WhisperModel::LargeV3), 3_000_000_000);
+    }
+
+    // ===================
+    // Format Size Tests
+    // ===================
+
+    #[test]
+    fn test_format_size_bytes() {
+        assert_eq!(format_size(500), "500 B");
+        assert_eq!(format_size(1023), "1023 B");
+    }
+
+    #[test]
+    fn test_format_size_kilobytes() {
+        assert_eq!(format_size(1024), "1 KB");
+        assert_eq!(format_size(5120), "5 KB");
+    }
+
+    #[test]
+    fn test_format_size_megabytes() {
+        assert_eq!(format_size(1024 * 1024), "1 MB");
+        assert_eq!(format_size(75_000_000), "72 MB");
+        assert_eq!(format_size(500 * 1024 * 1024), "500 MB");
+    }
+
+    #[test]
+    fn test_format_size_gigabytes() {
+        assert_eq!(format_size(1024 * 1024 * 1024), "1.0 GB");
+        assert_eq!(format_size(3_000_000_000), "2.8 GB");
+    }
+
+    // ===================
+    // All Models Tests
+    // ===================
+
+    #[test]
+    fn test_all_models() {
+        let models = all_models();
+        assert_eq!(models.len(), 5);
+        assert!(models.contains(&WhisperModel::Tiny));
+        assert!(models.contains(&WhisperModel::Base));
+        assert!(models.contains(&WhisperModel::Small));
+        assert!(models.contains(&WhisperModel::Medium));
+        assert!(models.contains(&WhisperModel::LargeV3));
+    }
+
+    // ===================
+    // Language ID Tests
+    // ===================
+
+    #[test]
+    fn test_lang_id_common_languages() {
+        assert_eq!(lang_id_to_code(0), "en");
+        assert_eq!(lang_id_to_code(2), "de");
+        assert_eq!(lang_id_to_code(6), "fr");
+        assert_eq!(lang_id_to_code(7), "ja");
+        assert_eq!(lang_id_to_code(15), "it");
+    }
+
+    #[test]
+    fn test_lang_id_unknown() {
+        assert_eq!(lang_id_to_code(999), "unknown");
+        assert_eq!(lang_id_to_code(-1), "unknown");
+    }
+
+    #[test]
+    fn test_lang_id_all_supported() {
+        // Test a sampling of languages across the range
+        assert_eq!(lang_id_to_code(1), "zh");   // chinese
+        assert_eq!(lang_id_to_code(10), "pl");  // polish
+        assert_eq!(lang_id_to_code(20), "he");  // hebrew
+        assert_eq!(lang_id_to_code(30), "th");  // thai
+        assert_eq!(lang_id_to_code(50), "br");  // breton
+        assert_eq!(lang_id_to_code(70), "ka");  // georgian
+        assert_eq!(lang_id_to_code(93), "haw"); // hawaiian
+        assert_eq!(lang_id_to_code(98), "su");  // sundanese
+    }
+
+    // ===================
+    // Download URL Tests
+    // ===================
+
+    #[test]
+    fn test_download_url() {
+        let url = WhisperModel::Tiny.download_url();
+        assert!(url.starts_with("https://huggingface.co/"));
+        assert!(url.contains("ggml-tiny.bin"));
+    }
+
+    // ===================
+    // TranscriptionResult Tests
+    // ===================
+
+    #[test]
+    fn test_transcription_result_clone() {
+        let result = TranscriptionResult {
+            text: "Hello world".to_string(),
+            language: "en".to_string(),
+            duration_ms: 100,
+        };
+        let cloned = result.clone();
+        assert_eq!(result.text, cloned.text);
+        assert_eq!(result.language, cloned.language);
+        assert_eq!(result.duration_ms, cloned.duration_ms);
+    }
+
+    // ===================
+    // BenchmarkResult Tests
+    // ===================
+
+    #[test]
+    fn test_benchmark_result_clone() {
+        let result = BenchmarkResult {
+            overhead_secs: 0.5,
+            recommended_chunk_interval: 0.6,
+            test_audio_secs: 2.0,
+        };
+        let cloned = result.clone();
+        assert!((result.overhead_secs - cloned.overhead_secs).abs() < 0.001);
+        assert!(
+            (result.recommended_chunk_interval - cloned.recommended_chunk_interval).abs() < 0.001
+        );
+    }
+
+    // ===================
+    // Error Tests
+    // ===================
+
+    #[test]
+    fn test_whisper_error_display() {
+        let err = WhisperError::ModelNotFound(PathBuf::from("/path"), "tiny".to_string());
+        let msg = err.to_string();
+        assert!(msg.contains("Model not found"));
+        assert!(msg.contains("/path"));
+        assert!(msg.contains("tiny"));
+
+        let err = WhisperError::LoadFailed("test error".to_string());
+        assert!(err.to_string().contains("test error"));
+
+        let err = WhisperError::TranscriptionFailed("failed".to_string());
+        assert!(err.to_string().contains("failed"));
     }
 }
