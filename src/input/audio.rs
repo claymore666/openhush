@@ -338,6 +338,98 @@ impl AudioBuffer {
     }
 }
 
+/// Load audio from a WAV file and convert to AudioBuffer
+///
+/// Supports WAV files with any sample rate (will be resampled to 16kHz)
+/// and any bit depth (8, 16, 24, 32-bit int or 32-bit float).
+pub fn load_wav_file(
+    path: &std::path::Path,
+    quality: ResamplingQuality,
+) -> Result<AudioBuffer, AudioRecorderError> {
+    use hound::WavReader;
+
+    let reader = WavReader::open(path).map_err(|e| {
+        AudioRecorderError::StreamBuildFailed(format!("Failed to open WAV file: {}", e))
+    })?;
+
+    let spec = reader.spec();
+    let file_sample_rate = spec.sample_rate;
+    let channels = spec.channels as usize;
+
+    info!(
+        "Loading WAV: {}Hz, {} channels, {:?} {:?}",
+        file_sample_rate, channels, spec.sample_format, spec.bits_per_sample
+    );
+
+    // Convert samples to f32, handling different formats
+    let samples_f32: Vec<f32> = match spec.sample_format {
+        hound::SampleFormat::Float => reader
+            .into_samples::<f32>()
+            .filter_map(Result::ok)
+            .collect(),
+        hound::SampleFormat::Int => {
+            let max_value = (1_i32 << (spec.bits_per_sample - 1)) as f32;
+            reader
+                .into_samples::<i32>()
+                .filter_map(Result::ok)
+                .map(|s| s as f32 / max_value)
+                .collect()
+        }
+    };
+
+    // Convert to mono if stereo (average channels)
+    let mono_samples: Vec<f32> = if channels > 1 {
+        samples_f32
+            .chunks(channels)
+            .map(|chunk| chunk.iter().sum::<f32>() / channels as f32)
+            .collect()
+    } else {
+        samples_f32
+    };
+
+    // Resample to 16kHz if needed
+    let resampled = if file_sample_rate != SAMPLE_RATE {
+        info!(
+            "Resampling from {}Hz to {}Hz ({} quality)",
+            file_sample_rate,
+            SAMPLE_RATE,
+            match quality {
+                ResamplingQuality::Low => "low",
+                ResamplingQuality::High => "high",
+            }
+        );
+        resample(&mono_samples, file_sample_rate, SAMPLE_RATE, quality)
+    } else {
+        mono_samples
+    };
+
+    let mut buffer = AudioBuffer {
+        samples: resampled,
+        sample_rate: SAMPLE_RATE,
+    };
+
+    // Pad with silence if shorter than Whisper's minimum (1000ms)
+    if buffer.duration_secs() < WHISPER_MIN_DURATION_SECS {
+        let samples_needed = (SAMPLE_RATE as f32 * WHISPER_MIN_DURATION_SECS) as usize;
+        let padding = samples_needed - buffer.samples.len();
+        debug!(
+            "Padding audio with {} samples of silence ({:.0}ms)",
+            padding,
+            padding as f32 / SAMPLE_RATE as f32 * 1000.0
+        );
+        buffer.samples.extend(vec![0.0f32; padding]);
+    }
+
+    info!(
+        "Loaded WAV file: {:.2}s ({} samples at {}Hz)",
+        buffer.duration_secs(),
+        buffer.samples.len(),
+        buffer.sample_rate
+    );
+
+    Ok(buffer)
+}
+
 /// Audio recorder for capturing microphone input.
 ///
 /// Uses an always-on ring buffer for low-latency capture:

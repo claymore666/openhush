@@ -94,6 +94,10 @@ enum Commands {
         /// Output format (text, json)
         #[arg(short, long, default_value = "text")]
         format: String,
+
+        /// Override model (tiny, base, small, medium, large-v3)
+        #[arg(short, long)]
+        model: Option<String>,
     },
 }
 
@@ -334,13 +338,109 @@ async fn main() -> anyhow::Result<()> {
             }
         },
 
-        Commands::Transcribe { file, format } => {
-            info!("Transcribing: {}", file);
-            // TODO: Implement one-shot transcription
+        Commands::Transcribe {
+            file,
+            format,
+            model: model_override,
+        } => {
+            use std::path::Path;
+            use std::time::Instant;
+
+            let file_path = Path::new(&file);
+
+            // Validate file exists
+            if !file_path.exists() {
+                anyhow::bail!("File not found: {}", file);
+            }
+
+            // Load config for model and language settings
+            let config = config::Config::load().unwrap_or_default();
+
+            // Load audio file
+            info!("Loading audio file: {}", file);
+            let start_load = Instant::now();
+            let audio = input::load_wav_file(file_path, config.audio.resampling_quality)?;
+            let load_time = start_load.elapsed();
+
             println!(
-                "One-shot transcription not yet implemented (file: {}, format: {})",
-                file, format
+                "Loaded: {:.2}s audio ({} samples) in {:.0}ms",
+                audio.duration_secs(),
+                audio.samples.len(),
+                load_time.as_millis()
             );
+
+            // Initialize Whisper engine
+            let data_dir = config::Config::data_dir()?;
+            let model_name = model_override
+                .as_deref()
+                .unwrap_or_else(|| config.transcription.effective_model());
+            let model: engine::whisper::WhisperModel = model_name.parse().map_err(|()| {
+                anyhow::anyhow!(
+                    "Unknown model '{}'. Available: tiny, base, small, medium, large-v3",
+                    model_name
+                )
+            })?;
+            let model_path = data_dir.join("models").join(model.filename());
+
+            if !model_path.exists() {
+                anyhow::bail!(
+                    "Model not found: {}\nRun: openhush model download {}",
+                    model_path.display(),
+                    model_name
+                );
+            }
+
+            println!(
+                "Loading model: {} (GPU: {})",
+                model.filename(),
+                config.transcription.device.to_lowercase() != "cpu"
+            );
+
+            let start_model = Instant::now();
+            let engine = engine::whisper::WhisperEngine::new(
+                &model_path,
+                &config.transcription.language,
+                config.transcription.translate,
+                config.transcription.device.to_lowercase() != "cpu",
+            )?;
+            let model_time = start_model.elapsed();
+            println!("Model loaded in {:.0}ms", model_time.as_millis());
+
+            // Transcribe
+            println!("Transcribing...");
+            let start_transcribe = Instant::now();
+            let result = engine.transcribe(&audio)?;
+            let transcribe_time = start_transcribe.elapsed();
+
+            // Calculate real-time factor (RTF)
+            let rtf = transcribe_time.as_secs_f32() / audio.duration_secs();
+
+            match format.as_str() {
+                "json" => {
+                    // JSON output for programmatic use
+                    let json = serde_json::json!({
+                        "text": result.text,
+                        "language": result.language,
+                        "duration_ms": result.duration_ms,
+                        "audio_duration_secs": audio.duration_secs(),
+                        "transcription_time_ms": transcribe_time.as_millis() as u64,
+                        "real_time_factor": rtf,
+                        "model": format!("{:?}", model).to_lowercase(),
+                    });
+                    println!("{}", serde_json::to_string_pretty(&json)?);
+                }
+                _ => {
+                    // Text output (default)
+                    println!("\n--- Transcription ---");
+                    println!("{}", result.text);
+                    println!("---");
+                    println!(
+                        "\nTime: {:.0}ms (RTF: {:.3}x)",
+                        transcribe_time.as_millis(),
+                        rtf
+                    );
+                }
+            }
         }
     }
 
