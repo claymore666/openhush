@@ -20,6 +20,10 @@ use crate::queue::{
 };
 #[cfg(target_os = "linux")]
 use crate::tray::{TrayEvent, TrayManager};
+#[cfg(target_os = "linux")]
+use crate::dbus::{DbusService, DaemonCommand, DaemonStatus};
+#[cfg(target_os = "linux")]
+use tokio::sync::RwLock;
 use crate::vad::VadConfig;
 use crate::vad::{silero::SileroVad, VadEngine, VadError, VadState};
 use crate::vocabulary::{VocabularyError, VocabularyManager};
@@ -377,6 +381,18 @@ impl Daemon {
             info!("System tray not yet supported on this platform");
         }
 
+        // Initialize D-Bus service (Linux only)
+        #[cfg(target_os = "linux")]
+        let dbus_status = Arc::new(RwLock::new(DaemonStatus::default()));
+        #[cfg(target_os = "linux")]
+        let (dbus_service, mut dbus_rx) = match DbusService::start(dbus_status.clone()).await {
+            Ok((service, rx)) => (Some(service), Some(rx)),
+            Err(e) => {
+                warn!("D-Bus service unavailable: {}. Continuing without D-Bus control.", e);
+                (None, None)
+            }
+        };
+
         // Check if model exists
         let model_path = self.model_path()?;
         let effective_model = self.config.transcription.effective_model();
@@ -587,6 +603,101 @@ impl Daemon {
                             }
                             TrayEvent::StatusClicked => {
                                 debug!("Status clicked");
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Check for D-Bus commands (Linux only)
+            #[cfg(target_os = "linux")]
+            if let Some(ref mut rx) = dbus_rx {
+                if let Ok(cmd) = rx.try_recv() {
+                    match cmd {
+                        DaemonCommand::StartRecording => {
+                            if matches!(self.state, DaemonState::Idle) {
+                                info!("🎙️ Recording started via D-Bus");
+                                let mark = audio_recorder.mark();
+                                tracker.reset_dedup();
+
+                                // Start chunk timer if streaming enabled
+                                if let Some(interval) = chunk_interval {
+                                    let mut timer = tokio::time::interval(interval);
+                                    timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                                    chunk_timer = Some(timer);
+                                }
+
+                                self.state = DaemonState::Recording {
+                                    mark,
+                                    last_chunk_pos: audio_recorder.current_position(),
+                                    next_chunk_id: 0,
+                                };
+
+                                // Update D-Bus status
+                                {
+                                    let mut status = dbus_status.write().await;
+                                    status.is_recording = true;
+                                }
+                                if let Some(ref service) = dbus_service {
+                                    let _ = service.emit_recording_changed().await;
+                                }
+                            }
+                        }
+                        DaemonCommand::StopRecording => {
+                            if !matches!(self.state, DaemonState::Idle) {
+                                info!("🛑 Recording stopped via D-Bus");
+                                chunk_timer = None;
+                                vad_timer = None;
+                                self.state = DaemonState::Idle;
+
+                                // Update D-Bus status
+                                {
+                                    let mut status = dbus_status.write().await;
+                                    status.is_recording = false;
+                                }
+                                if let Some(ref service) = dbus_service {
+                                    let _ = service.emit_recording_changed().await;
+                                }
+                            }
+                        }
+                        DaemonCommand::ToggleRecording => {
+                            if matches!(self.state, DaemonState::Idle) {
+                                info!("🎙️ Recording toggled ON via D-Bus");
+                                let mark = audio_recorder.mark();
+                                tracker.reset_dedup();
+
+                                if let Some(interval) = chunk_interval {
+                                    let mut timer = tokio::time::interval(interval);
+                                    timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                                    chunk_timer = Some(timer);
+                                }
+
+                                self.state = DaemonState::Recording {
+                                    mark,
+                                    last_chunk_pos: audio_recorder.current_position(),
+                                    next_chunk_id: 0,
+                                };
+
+                                {
+                                    let mut status = dbus_status.write().await;
+                                    status.is_recording = true;
+                                }
+                                if let Some(ref service) = dbus_service {
+                                    let _ = service.emit_recording_changed().await;
+                                }
+                            } else {
+                                info!("🛑 Recording toggled OFF via D-Bus");
+                                chunk_timer = None;
+                                vad_timer = None;
+                                self.state = DaemonState::Idle;
+
+                                {
+                                    let mut status = dbus_status.write().await;
+                                    status.is_recording = false;
+                                }
+                                if let Some(ref service) = dbus_service {
+                                    let _ = service.emit_recording_changed().await;
+                                }
                             }
                         }
                     }

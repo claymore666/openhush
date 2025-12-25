@@ -1,0 +1,25 @@
+[Unit]
+Description=OpenHush Voice-to-Text Daemon
+Documentation=https://github.com/claymore666/openhush
+After=graphical-session.target
+Wants=graphical-session.target
+
+[Service]
+Type=dbus
+BusName=org.openhush.Daemon1
+ExecStart=/usr/bin/openhush start --foreground
+Restart=on-failure
+RestartSec=5
+
+# Environment for CUDA/GPU support (adjust path as needed)
+# Environment=ORT_DYLIB_PATH=/usr/lib/libonnxruntime.so
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.local/share/openhush %h/.config/openhush %h/.cache/openhush
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target
