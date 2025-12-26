@@ -9,6 +9,7 @@ mod correction;
 mod daemon;
 #[cfg(target_os = "linux")]
 mod dbus;
+#[cfg(feature = "diarization")]
 mod diarization;
 mod engine;
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]

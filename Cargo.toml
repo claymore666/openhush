@@ -17,6 +17,8 @@ hipblas = ["whisper-rs/hipblas"] # AMD ROCm/HIP (Linux only)
 metal = ["whisper-rs/metal"]     # Apple Metal (macOS only)
 vulkan = ["whisper-rs/vulkan"]   # Vulkan (cross-platform)
 debug-audio = []
+# Speaker diarization (disabled by default due to candle-core rand conflict)
+diarization = ["pyannote-rs"]
 
 [dependencies]
 # Transcription
@@ -25,8 +27,8 @@ whisper-rs = "0.13"
 # Voice Activity Detection (Silero VAD with bundled ONNX)
 silero-vad-rust = "6.2"
 
-# Speaker diarization (pyannote in Rust)
-pyannote-rs = { version = "0.3", features = ["load-dynamic"] }
+# Speaker diarization (pyannote in Rust) - optional due to candle-core rand conflict
+pyannote-rs = { version = "0.3", features = ["load-dynamic"], optional = true }
 
 # Audio capture
 cpal = "0.17"
@@ -34,9 +36,8 @@ cpal = "0.17"
 # High-quality audio resampling
 rubato = "0.16"
 
-# Wake word detection (keyword spotting)
-# TODO: Blocked by candle-core f16 bug: https://github.com/huggingface/candle/issues/2805
-# rustpotter = { version = "3.0", default-features = false }
+# Wake word detection (openWakeWord ONNX models)
+ort = { version = "2.0.0-rc.10", features = ["load-dynamic"] }
 
 # WAV file reading for one-shot transcription
 hound = "3.5"

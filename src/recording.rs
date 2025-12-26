@@ -9,6 +9,7 @@
 #![allow(dead_code)] // Diarization and mixed recording features used in Phase 3
 
 use crate::config::Config;
+#[cfg(feature = "diarization")]
 use crate::diarization::{DiarizationConfig, DiarizationEngine, DiarizationError};
 use crate::engine::whisper::{WhisperEngine, WhisperError, WhisperModel};
 use crate::input::system_audio::{AudioSource, SystemAudioCapture, SystemAudioError};
@@ -54,6 +55,7 @@ pub enum RecordingError {
     #[error("VAD error: {0}")]
     Vad(String),
 
+    #[cfg(feature = "diarization")]
     #[error("Diarization error: {0}")]
     Diarization(#[from] DiarizationError),
 
@@ -296,6 +298,7 @@ impl RecordingSession {
         let _vad = SileroVad::new(&vad_config).map_err(|e| RecordingError::Vad(e.to_string()))?;
 
         // Initialize diarization engine if enabled
+        #[cfg(feature = "diarization")]
         let mut diarization_engine = if self.config.enable_diarization {
             let diar_config = DiarizationConfig {
                 max_speakers: self.app_config.diarization.max_speakers,
@@ -306,6 +309,9 @@ impl RecordingSession {
         } else {
             None
         };
+
+        #[cfg(not(feature = "diarization"))]
+        let _diarization_engine: Option<()> = None;
 
         // Print header for VTT format
         if self.config.output_format == OutputFormat::Vtt && self.config.live_mode {
@@ -356,6 +362,7 @@ impl RecordingSession {
                 };
 
                 // Get speaker ID from diarization if enabled
+                #[cfg(feature = "diarization")]
                 let speaker_id = if let Some(ref mut diar_engine) = diarization_engine {
                     match diar_engine.diarize(&accumulated_samples, sample_rate) {
                         Ok(diar_segments) => {
@@ -370,6 +377,9 @@ impl RecordingSession {
                 } else {
                     None
                 };
+
+                #[cfg(not(feature = "diarization"))]
+                let speaker_id: Option<u32> = None;
 
                 // Transcribe
                 match engine.transcribe(&audio) {
@@ -428,6 +438,7 @@ impl RecordingSession {
                 start_time.elapsed().as_secs_f32() - (accumulated_samples.len() as f32 / 16000.0);
 
             // Get final speaker ID from diarization if enabled
+            #[cfg(feature = "diarization")]
             let final_speaker_id = if let Some(ref mut diar_engine) = diarization_engine {
                 match diar_engine.diarize(&accumulated_samples, 16000) {
                     Ok(diar_segments) => diar_segments.first().map(|s| s.speaker_id),
@@ -436,6 +447,9 @@ impl RecordingSession {
             } else {
                 None
             };
+
+            #[cfg(not(feature = "diarization"))]
+            let final_speaker_id: Option<u32> = None;
 
             let audio = AudioBuffer {
                 samples: accumulated_samples,
@@ -474,6 +488,7 @@ impl RecordingSession {
             format_timestamp(total_duration.as_secs_f32())
         );
         println!("Segments: {}", self.segments.len());
+        #[cfg(feature = "diarization")]
         if let Some(ref diar_engine) = diarization_engine {
             println!("Speakers detected: {}", diar_engine.speaker_count());
         }
