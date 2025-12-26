@@ -6,6 +6,8 @@ use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, Env
 mod config;
 mod correction;
 mod daemon;
+#[cfg(target_os = "linux")]
+mod dbus;
 mod engine;
 #[cfg(target_os = "linux")]
 mod gui;
@@ -99,6 +101,30 @@ enum Commands {
         #[arg(short, long)]
         model: Option<String>,
     },
+
+    /// Control recording on a running daemon (Linux only, requires D-Bus)
+    #[cfg(target_os = "linux")]
+    Recording {
+        #[command(subcommand)]
+        action: RecordingAction,
+    },
+}
+
+/// Recording control actions (sent to daemon via D-Bus)
+#[cfg(target_os = "linux")]
+#[derive(Subcommand)]
+enum RecordingAction {
+    /// Start recording audio
+    Start,
+
+    /// Stop recording audio
+    Stop,
+
+    /// Toggle recording state
+    Toggle,
+
+    /// Show current recording status
+    Status,
 }
 
 #[derive(Subcommand)]
@@ -439,6 +465,49 @@ async fn main() -> anyhow::Result<()> {
                         transcribe_time.as_millis(),
                         rtf
                     );
+                }
+            }
+        }
+
+        #[cfg(target_os = "linux")]
+        Commands::Recording { action } => {
+            use dbus::DbusClient;
+
+            let client = match DbusClient::connect().await {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("Failed to connect to D-Bus: {}", e);
+                    eprintln!("Is the daemon running? Try: openhush start");
+                    std::process::exit(1);
+                }
+            };
+
+            if !client.is_daemon_running().await {
+                eprintln!("Daemon is not running. Start it with: openhush start");
+                std::process::exit(1);
+            }
+
+            match action {
+                RecordingAction::Start => {
+                    client.start_recording().await?;
+                    println!("Recording started");
+                }
+                RecordingAction::Stop => {
+                    client.stop_recording().await?;
+                    println!("Recording stopped");
+                }
+                RecordingAction::Toggle => {
+                    client.toggle_recording().await?;
+                    let status = client.get_status().await?;
+                    println!("Recording toggled: {}", status);
+                }
+                RecordingAction::Status => {
+                    let status = client.get_status().await?;
+                    let queue = client.queue_depth().await?;
+                    let version = client.version().await?;
+                    println!("Status: {}", status);
+                    println!("Queue depth: {}", queue);
+                    println!("Version: {}", version);
                 }
             }
         }

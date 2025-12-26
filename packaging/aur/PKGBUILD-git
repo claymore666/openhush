@@ -1,0 +1,79 @@
+# Maintainer: OpenHush Team <christian.kamien@gmail.com>
+pkgname=openhush-git
+pkgver=r0.0.0
+pkgrel=1
+pkgdesc="Open-source voice-to-text that acts as a seamless whisper keyboard (development version)"
+arch=('x86_64')
+url="https://github.com/claymore666/openhush"
+license=('MIT')
+depends=(
+    'alsa-lib'
+    'dbus'
+    'gtk3'
+    'libxkbcommon'
+)
+makedepends=(
+    'rust'
+    'cargo'
+    'clang'
+    'cmake'
+    'git'
+)
+optdepends=(
+    'xdotool: X11 text input simulation'
+    'wtype: Wayland text input simulation'
+    'cuda: NVIDIA GPU acceleration'
+    'ollama: LLM-powered text correction'
+)
+provides=('openhush')
+conflicts=('openhush')
+source=("git+https://github.com/claymore666/openhush.git")
+sha256sums=('SKIP')
+
+pkgver() {
+    cd openhush
+    printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+prepare() {
+    cd openhush
+    export RUSTUP_TOOLCHAIN=stable
+    cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+    cd openhush
+    export RUSTUP_TOOLCHAIN=stable
+    export CARGO_TARGET_DIR=target
+    cargo build --frozen --release --all-features
+}
+
+check() {
+    cd openhush
+    export RUSTUP_TOOLCHAIN=stable
+    cargo test --frozen --all-features || true
+}
+
+package() {
+    cd openhush
+
+    # Install binary
+    install -Dm755 "target/release/openhush" "$pkgdir/usr/bin/openhush"
+
+    # Install license
+    install -Dm644 "LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+
+    # Install desktop entry
+    install -Dm644 "packaging/flatpak/org.openhush.OpenHush.desktop" \
+        "$pkgdir/usr/share/applications/openhush.desktop"
+
+    # Install D-Bus service file
+    install -Dm644 /dev/stdin "$pkgdir/usr/share/dbus-1/services/org.openhush.Daemon1.service" <<EOF
+[D-BUS Service]
+Name=org.openhush.Daemon1
+Exec=/usr/bin/openhush start --dbus
+EOF
+
+    # Install documentation
+    install -Dm644 "README.md" "$pkgdir/usr/share/doc/$pkgname/README.md"
+}

@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>org.openhush.OpenHush</id>
+
+  <name>OpenHush</name>
+  <summary>Open-source voice-to-text that acts as a seamless whisper keyboard</summary>
+
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+
+  <developer id="org.openhush">
+    <name>OpenHush Contributors</name>
+  </developer>
+
+  <description>
+    <p>
+      OpenHush is a privacy-first voice-to-text tool that runs entirely on your local machine.
+      No cloud, no subscriptions, no telemetry. Just fast, accurate transcription using
+      OpenAI's Whisper model.
+    </p>
+    <p>Features:</p>
+    <ul>
+      <li>Push-to-talk and toggle recording modes</li>
+      <li>Auto-paste transcribed text at your cursor</li>
+      <li>GPU acceleration (NVIDIA CUDA, AMD ROCm, Vulkan)</li>
+      <li>99+ language support with auto-detection</li>
+      <li>Optional translation to English</li>
+      <li>LLM-powered grammar correction via Ollama</li>
+      <li>Voice Activity Detection for continuous dictation</li>
+      <li>Custom vocabulary for domain-specific terms</li>
+      <li>File transcription for WAV/MP3 recordings</li>
+      <li>D-Bus integration for scripting and automation</li>
+    </ul>
+    <p>
+      OpenHush is designed for privacy-conscious users who need fast, accurate dictation
+      without sending their voice data to the cloud.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">org.openhush.OpenHush.desktop</launchable>
+
+  <url type="homepage">https://github.com/claymore666/openhush</url>
+  <url type="bugtracker">https://github.com/claymore666/openhush/issues</url>
+  <url type="vcs-browser">https://github.com/claymore666/openhush</url>
+
+  <provides>
+    <binary>openhush</binary>
+    <dbus type="user">org.openhush.Daemon1</dbus>
+  </provides>
+
+  <requires>
+    <display_length compare="ge">360</display_length>
+  </requires>
+
+  <recommends>
+    <control>keyboard</control>
+    <control>pointing</control>
+  </recommends>
+
+  <supports>
+    <control>voice</control>
+  </supports>
+
+  <categories>
+    <category>Utility</category>
+    <category>Accessibility</category>
+    <category>Audio</category>
+  </categories>
+
+  <keywords>
+    <keyword>voice</keyword>
+    <keyword>speech</keyword>
+    <keyword>dictation</keyword>
+    <keyword>transcription</keyword>
+    <keyword>whisper</keyword>
+    <keyword>stt</keyword>
+    <keyword>speech-to-text</keyword>
+    <keyword>accessibility</keyword>
+  </keywords>
+
+  <screenshots>
+    <!-- Add screenshots when available -->
+    <!--
+    <screenshot type="default">
+      <caption>OpenHush preferences window</caption>
+      <image>https://raw.githubusercontent.com/claymore666/openhush/main/assets/screenshots/preferences.png</image>
+    </screenshot>
+    -->
+  </screenshots>
+
+  <releases>
+    <release version="0.5.0" date="2025-12-26">
+      <description>
+        <p>v0.5.0 - Linux Desktop Integration</p>
+        <ul>
+          <li>D-Bus service mode for daemon control</li>
+          <li>Comprehensive wiki documentation</li>
+          <li>File transcription command</li>
+          <li>Multi-GPU support (AMD ROCm, Apple Metal, Vulkan)</li>
+        </ul>
+      </description>
+    </release>
+    <release version="0.4.0" date="2025-12-24">
+      <description>
+        <p>v0.4.0 - Cross-Platform Support</p>
+        <ul>
+          <li>macOS support (Intel and Apple Silicon)</li>
+          <li>Windows 10/11 support</li>
+          <li>Dark mode support</li>
+          <li>Automated release builds</li>
+        </ul>
+      </description>
+    </release>
+    <release version="0.3.0" date="2025-12-24">
+      <description>
+        <p>v0.3.0 - Transcription Quality</p>
+        <ul>
+          <li>Voice Activity Detection (Silero-VAD)</li>
+          <li>RNNoise noise reduction</li>
+          <li>Custom vocabulary system</li>
+          <li>Filler word removal via Ollama</li>
+          <li>Transcription presets</li>
+        </ul>
+      </description>
+    </release>
+    <release version="0.2.0" date="2025-12-20">
+      <description>
+        <p>v0.2.0 - Stability and Production Hardening</p>
+        <ul>
+          <li>GPU auto-tune benchmark</li>
+          <li>Crash diagnostics</li>
+          <li>Streaming transcription</li>
+          <li>Backpressure strategies</li>
+        </ul>
+      </description>
+    </release>
+    <release version="0.1.0" date="2025-12-20">
+      <description>
+        <p>Initial release with core functionality</p>
+        <ul>
+          <li>Push-to-talk recording</li>
+          <li>Local Whisper transcription</li>
+          <li>GPU acceleration</li>
+          <li>Auto-paste output</li>
+        </ul>
+      </description>
+    </release>
+  </releases>
+
+  <content_rating type="oars-1.1" />
+</component>

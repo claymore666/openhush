@@ -1,0 +1,27 @@
+[Desktop Entry]
+Type=Application
+Name=OpenHush
+GenericName=Voice to Text
+Comment=Open-source voice-to-text that acts as a seamless whisper keyboard
+Exec=openhush preferences
+Icon=org.openhush.OpenHush
+Terminal=false
+Categories=Utility;Accessibility;Audio;
+Keywords=voice;speech;dictation;transcription;whisper;stt;
+StartupNotify=true
+StartupWMClass=openhush
+
+# Actions for quick access
+Actions=start;stop;status;
+
+[Desktop Action start]
+Name=Start Daemon
+Exec=openhush start
+
+[Desktop Action stop]
+Name=Stop Daemon
+Exec=openhush stop
+
+[Desktop Action status]
+Name=Check Status
+Exec=openhush status

@@ -6,6 +6,8 @@
 pub mod config;
 pub mod correction;
 pub mod daemon;
+#[cfg(target_os = "linux")]
+pub mod dbus;
 pub mod engine;
 #[cfg(target_os = "linux")]
 pub mod gui;

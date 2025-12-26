@@ -141,8 +141,237 @@ jobs:
           path: openhush-${{ github.ref_name }}-${{ matrix.name }}.*
           if-no-files-found: error
 
-  release:
+  # ===================
+  # Linux Packages (.deb)
+  # ===================
+  package-linux:
     needs: build
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: openhush-linux-x86_64
+          path: artifact
+
+      - name: Extract binary
+        run: |
+          cd artifact
+          tar xzf openhush-*.tar.gz
+          chmod +x openhush
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y debhelper fakeroot
+
+      - name: Build .deb package
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"  # Remove 'v' prefix
+
+          # Create package structure
+          PKG_DIR="openhush_${VERSION}_amd64"
+          mkdir -p "${PKG_DIR}/DEBIAN"
+          mkdir -p "${PKG_DIR}/usr/bin"
+          mkdir -p "${PKG_DIR}/usr/share/applications"
+          mkdir -p "${PKG_DIR}/usr/share/doc/openhush"
+
+          # Copy binary
+          cp artifact/openhush "${PKG_DIR}/usr/bin/"
+          chmod 755 "${PKG_DIR}/usr/bin/openhush"
+
+          # Create control file
+          cat > "${PKG_DIR}/DEBIAN/control" << EOF
+          Package: openhush
+          Version: ${VERSION}
+          Section: utils
+          Priority: optional
+          Architecture: amd64
+          Depends: libasound2, libdbus-1-3
+          Maintainer: OpenHush Team <christian.kamien@gmail.com>
+          Description: Voice-to-text transcription tool
+           OpenHush is a local, privacy-focused voice-to-text tool
+           that runs entirely on your machine using Whisper AI models.
+          EOF
+
+          # Create desktop entry
+          cat > "${PKG_DIR}/usr/share/applications/openhush.desktop" << EOF
+          [Desktop Entry]
+          Name=OpenHush
+          Comment=Voice-to-text transcription
+          Exec=openhush
+          Icon=openhush
+          Terminal=false
+          Type=Application
+          Categories=Utility;Audio;
+          EOF
+
+          # Copy license
+          cp LICENSE "${PKG_DIR}/usr/share/doc/openhush/copyright"
+
+          # Build package
+          fakeroot dpkg-deb --build "${PKG_DIR}"
+          mv "${PKG_DIR}.deb" "openhush-${{ github.ref_name }}-amd64.deb"
+
+      - name: Upload .deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: openhush-deb
+          path: openhush-*.deb
+          if-no-files-found: error
+
+  # ===================
+  # macOS Package (.dmg)
+  # ===================
+  package-macos:
+    needs: build
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: openhush-macos-*
+          path: artifacts
+          merge-multiple: false
+
+      - name: Create universal binary
+        run: |
+          # Extract both architectures
+          mkdir -p x86_64 aarch64
+          cd artifacts/openhush-macos-x86_64 && tar xzf openhush-*.tar.gz && mv openhush ../../x86_64/
+          cd ../openhush-macos-aarch64 && tar xzf openhush-*.tar.gz && mv openhush ../../aarch64/
+          cd ../..
+
+          # Create universal binary with lipo
+          lipo -create -output openhush x86_64/openhush aarch64/openhush
+          chmod +x openhush
+
+      - name: Install create-dmg
+        run: brew install create-dmg
+
+      - name: Build DMG
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+
+          # Create app bundle
+          APP_DIR="OpenHush.app"
+          mkdir -p "${APP_DIR}/Contents/MacOS"
+          mkdir -p "${APP_DIR}/Contents/Resources"
+
+          cp openhush "${APP_DIR}/Contents/MacOS/"
+
+          # Create Info.plist
+          cat > "${APP_DIR}/Contents/Info.plist" << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleExecutable</key>
+              <string>openhush</string>
+              <key>CFBundleIdentifier</key>
+              <string>org.openhush.OpenHush</string>
+              <key>CFBundleName</key>
+              <string>OpenHush</string>
+              <key>CFBundleVersion</key>
+              <string>${VERSION}</string>
+              <key>CFBundleShortVersionString</key>
+              <string>${VERSION}</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>LSMinimumSystemVersion</key>
+              <string>11.0</string>
+              <key>LSUIElement</key>
+              <true/>
+              <key>NSHighResolutionCapable</key>
+              <true/>
+              <key>NSMicrophoneUsageDescription</key>
+              <string>OpenHush needs microphone access for voice-to-text transcription.</string>
+          </dict>
+          </plist>
+          EOF
+
+          # Create DMG (simple method for unsigned builds)
+          hdiutil create -volname "OpenHush ${VERSION}" \
+              -srcfolder "${APP_DIR}" \
+              -ov -format UDZO \
+              "openhush-${{ github.ref_name }}-macos-universal.dmg"
+
+      - name: Upload .dmg artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: openhush-dmg
+          path: openhush-*.dmg
+          if-no-files-found: error
+
+  # ===================
+  # Windows Package (.msi)
+  # ===================
+  package-windows:
+    needs: build
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: openhush-windows-x86_64
+          path: artifact
+
+      - name: Extract binary
+        shell: pwsh
+        run: |
+          Expand-Archive -Path artifact\openhush-*.zip -DestinationPath artifact\extracted
+
+      - name: Install WiX Toolset
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix
+
+      - name: Build MSI
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}" -replace '^v', ''
+
+          # Copy binary to packaging dir
+          Copy-Item "artifact\extracted\openhush.exe" -Destination "packaging\windows\"
+
+          # Create LICENSE.rtf
+          $license = Get-Content "LICENSE" -Raw
+          $rtf = "{\rtf1\ansi\deff0 {\fonttbl {\f0 Consolas;}}\f0\fs20 $($license -replace "`n", "\par ")}"
+          $rtf | Out-File -FilePath "packaging\windows\LICENSE.rtf" -Encoding ASCII
+
+          # Build MSI
+          cd packaging\windows
+          wix build openhush.wxs `
+              -d SourceDir="." `
+              -d Version="$version" `
+              -o "..\..\openhush-${{ github.ref_name }}-x64.msi"
+
+      - name: Upload .msi artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: openhush-msi
+          path: openhush-*.msi
+          if-no-files-found: error
+
+  # ===================
+  # Create GitHub Release
+  # ===================
+  release:
+    needs: [build, package-linux, package-macos, package-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -160,7 +389,10 @@ jobs:
       - name: Prepare release files
         run: |
           mkdir -p release
+          # Binary tarballs/zips
           find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec cp {} release/ \;
+          # Distribution packages
+          find artifacts -type f \( -name "*.deb" -o -name "*.dmg" -o -name "*.msi" \) -exec cp {} release/ \;
           ls -la release/
 
       - name: Generate checksums
@@ -176,6 +408,9 @@ jobs:
           files: |
             release/*.tar.gz
             release/*.zip
+            release/*.deb
+            release/*.dmg
+            release/*.msi
             release/*-checksums.txt
           generate_release_notes: true
           draft: false

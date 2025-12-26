@@ -1,0 +1,26 @@
+openhush (0.5.0-1) unstable; urgency=medium
+
+  * Initial Debian package release
+  * D-Bus service mode for daemon control
+  * File transcription command
+  * Multi-GPU support (CUDA, ROCm, Metal, Vulkan)
+  * Comprehensive documentation
+
+ -- OpenHush Team <christian.kamien@gmail.com>  Thu, 26 Dec 2025 10:00:00 +0100
+
+openhush (0.4.0-1) unstable; urgency=medium
+
+  * Cross-platform support (macOS, Windows)
+  * Dark mode support
+  * Automated release builds
+
+ -- OpenHush Team <christian.kamien@gmail.com>  Tue, 24 Dec 2025 12:00:00 +0100
+
+openhush (0.3.0-1) unstable; urgency=medium
+
+  * Voice Activity Detection (Silero-VAD)
+  * RNNoise noise reduction
+  * Custom vocabulary system
+  * Filler word removal via Ollama
+
+ -- OpenHush Team <christian.kamien@gmail.com>  Tue, 24 Dec 2025 10:00:00 +0100

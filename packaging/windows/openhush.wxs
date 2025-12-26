@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  WiX installer for OpenHush
+  Build with: wix build openhush.wxs -o openhush.msi
+  Or use cargo-wix: cargo wix
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="OpenHush"
+           Manufacturer="OpenHush Team"
+           Version="0.5.0"
+           UpgradeCode="E8F3A2B1-5C4D-4E6F-8A9B-0C1D2E3F4A5B"
+           Scope="perUser">
+
+    <SummaryInformation Description="Open-source voice-to-text that acts as a seamless whisper keyboard" />
+
+    <Media Id="1" Cabinet="openhush.cab" EmbedCab="yes" />
+
+    <!-- Check for existing installation -->
+    <MajorUpgrade DowngradeErrorMessage="A newer version of OpenHush is already installed." />
+
+    <!-- Installation directory -->
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="INSTALLFOLDER" Name="OpenHush">
+        <Directory Id="BinFolder" Name="bin" />
+        <Directory Id="ModelsFolder" Name="models" />
+      </Directory>
+    </StandardDirectory>
+
+    <!-- Start Menu shortcuts -->
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="OpenHush" />
+    </StandardDirectory>
+
+    <!-- Components -->
+    <ComponentGroup Id="ProductComponents" Directory="BinFolder">
+      <!-- Main executable -->
+      <Component Id="MainExecutable" Guid="A1B2C3D4-E5F6-7890-ABCD-EF1234567890">
+        <File Id="openhush.exe" Source="$(var.SourceDir)\openhush.exe" KeyPath="yes">
+          <Shortcut Id="StartMenuShortcut"
+                    Name="OpenHush"
+                    Directory="ApplicationProgramsFolder"
+                    Description="Open-source voice-to-text"
+                    WorkingDirectory="BinFolder"
+                    Icon="openhush.ico"
+                    Advertise="yes" />
+        </File>
+
+        <!-- Add to PATH -->
+        <Environment Id="PATH"
+                     Name="PATH"
+                     Value="[BinFolder]"
+                     Permanent="no"
+                     Part="last"
+                     Action="set"
+                     System="no" />
+      </Component>
+    </ComponentGroup>
+
+    <!-- Icon for shortcuts -->
+    <Icon Id="openhush.ico" SourceFile="$(var.SourceDir)\openhush.ico" />
+
+    <!-- Features -->
+    <Feature Id="ProductFeature" Title="OpenHush" Level="1">
+      <ComponentGroupRef Id="ProductComponents" />
+    </Feature>
+
+    <!-- Custom actions -->
+    <CustomAction Id="LaunchApplication"
+                  FileRef="openhush.exe"
+                  ExeCommand="preferences"
+                  Return="asyncNoWait" />
+
+    <!-- UI -->
+    <UI>
+      <UIRef Id="WixUI_Minimal" />
+      <Publish Dialog="ExitDialog"
+               Control="Finish"
+               Event="DoAction"
+               Value="LaunchApplication">
+        WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed
+      </Publish>
+    </UI>
+
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch OpenHush" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
+
+    <!-- License -->
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.SourceDir)\LICENSE.rtf" />
+  </Package>
+</Wix>
