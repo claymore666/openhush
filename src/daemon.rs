@@ -12,7 +12,7 @@ use crate::correction::TextCorrector;
 #[cfg(target_os = "linux")]
 use crate::dbus::{DaemonCommand, DaemonStatus, DbusService};
 use crate::engine::{WhisperEngine, WhisperError};
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 use crate::gui;
 use crate::input::{AudioMark, AudioRecorder, AudioRecorderError, HotkeyEvent, HotkeyListener};
 use crate::output::{OutputError, OutputHandler};
@@ -20,7 +20,7 @@ use crate::platform::{CurrentPlatform, Platform};
 use crate::queue::{
     worker::spawn_worker, TranscriptionJob, TranscriptionResult, TranscriptionTracker,
 };
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 use crate::tray::{TrayEvent, TrayManager};
 use crate::vad::VadConfig;
 use crate::vad::{silero::SileroVad, VadEngine, VadError, VadState};
@@ -328,6 +328,20 @@ impl Daemon {
     pub fn new(config: Config) -> Result<Self, DaemonError> {
         let platform = CurrentPlatform::new()?;
 
+        // Check accessibility permissions on macOS
+        #[cfg(target_os = "macos")]
+        {
+            use crate::platform::PlatformError;
+            if let Err(e) = platform.check_accessibility_permissions() {
+                // Log the error but don't fail - macOS will prompt when needed
+                warn!("Accessibility check: {}", e);
+                // For permission denied, we continue but warn heavily
+                if matches!(e, PlatformError::Accessibility(_)) {
+                    warn!("OpenHush may not work correctly without accessibility permissions");
+                }
+            }
+        }
+
         Ok(Self {
             config,
             platform,
@@ -356,8 +370,8 @@ impl Daemon {
             self.config.transcription.preset
         );
 
-        // Initialize system tray if enabled (Linux and Windows)
-        #[cfg(any(target_os = "linux", target_os = "windows"))]
+        // Initialize system tray if enabled (Linux, macOS, and Windows)
+        #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
         let tray: Option<TrayManager> = if enable_tray {
             match TrayManager::new().await {
                 Ok(t) => {
@@ -374,9 +388,9 @@ impl Daemon {
             None
         };
 
-        #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+        #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
         let _tray_enabled = enable_tray; // Suppress unused warning
-        #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+        #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
         if enable_tray {
             info!("System tray not yet supported on this platform");
         }
@@ -588,8 +602,8 @@ impl Daemon {
                 }
             }
 
-            // Check for tray events (Linux and Windows)
-            #[cfg(any(target_os = "linux", target_os = "windows"))]
+            // Check for tray events (Linux, macOS, and Windows)
+            #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
             {
                 // Check for tray events (non-blocking)
                 if let Some(ref tray) = &tray {
@@ -1119,16 +1133,19 @@ fn is_running() -> bool {
     if let Ok(path) = pid_file() {
         if path.exists() {
             if let Ok(pid_str) = std::fs::read_to_string(&path) {
-                if let Ok(pid) = pid_str.trim().parse::<i32>() {
-                    #[cfg(unix)]
-                    {
+                #[cfg(unix)]
+                {
+                    if let Ok(pid) = pid_str.trim().parse::<i32>() {
                         use nix::sys::signal::kill;
                         use nix::unistd::Pid;
                         // kill with signal None (0) only checks if process exists
                         return kill(Pid::from_raw(pid), None).is_ok();
                     }
-                    #[cfg(not(unix))]
-                    {
+                }
+                #[cfg(not(unix))]
+                {
+                    // On non-unix, we can only check if PID file exists and has valid content
+                    if pid_str.trim().parse::<i32>().is_ok() {
                         return true;
                     }
                 }
@@ -1305,21 +1322,21 @@ fn check_and_cleanup_stale_pid() -> Result<(), DaemonError> {
         Err(_) => return Ok(()), // Can't read, probably doesn't exist
     };
 
-    let pid: i32 = match pid_str.trim().parse() {
-        Ok(p) => p,
-        Err(_) => {
-            // Invalid PID file content, remove it
-            warn!("Removing invalid PID file");
-            if let Err(e) = std::fs::remove_file(&path) {
-                warn!("Failed to remove invalid PID file: {}", e);
-            }
-            return Ok(());
-        }
-    };
-
     // Check if process is actually running
     #[cfg(unix)]
     {
+        let pid: i32 = match pid_str.trim().parse() {
+            Ok(p) => p,
+            Err(_) => {
+                // Invalid PID file content, remove it
+                warn!("Removing invalid PID file");
+                if let Err(e) = std::fs::remove_file(&path) {
+                    warn!("Failed to remove invalid PID file: {}", e);
+                }
+                return Ok(());
+            }
+        };
+
         use nix::sys::signal::kill;
         use nix::unistd::Pid;
         // kill with signal None (0) only checks if process exists
@@ -1333,6 +1350,18 @@ fn check_and_cleanup_stale_pid() -> Result<(), DaemonError> {
                 warn!("Failed to remove stale PID file: {}", e);
             }
         }
+    }
+
+    #[cfg(not(unix))]
+    {
+        // On non-unix, just validate the PID file content
+        if pid_str.trim().parse::<i32>().is_err() {
+            warn!("Removing invalid PID file");
+            if let Err(e) = std::fs::remove_file(&path) {
+                warn!("Failed to remove invalid PID file: {}", e);
+            }
+        }
+        // Can't check if process is running on non-unix without platform-specific APIs
     }
 
     Ok(())

@@ -9,14 +9,14 @@ pub mod daemon;
 #[cfg(target_os = "linux")]
 pub mod dbus;
 pub mod engine;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 pub mod gui;
 pub mod input;
 pub mod output;
 pub mod panic_handler;
 pub mod platform;
 pub mod queue;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 pub mod tray;
 pub mod vad;
 pub mod vocabulary;

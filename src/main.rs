@@ -9,13 +9,14 @@ mod daemon;
 #[cfg(target_os = "linux")]
 mod dbus;
 mod engine;
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 mod gui;
 mod input;
 mod output;
 mod panic_handler;
 mod platform;
 mod queue;
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 mod tray;
 mod vad;
 mod vocabulary;
