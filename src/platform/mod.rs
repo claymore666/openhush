@@ -57,6 +57,12 @@ pub enum PlatformError {
 
     #[error("Platform not supported: {0}")]
     NotSupported(String),
+
+    #[error("Accessibility permission required: {0}")]
+    Accessibility(String),
+
+    #[error("{0}")]
+    Other(String),
 }
 
 /// Hotkey events
@@ -308,6 +314,12 @@ mod tests {
 
         let err = PlatformError::NotSupported("feature".to_string());
         assert!(err.to_string().contains("not supported"));
+
+        let err = PlatformError::Accessibility("permission denied".to_string());
+        assert!(err.to_string().contains("Accessibility"));
+
+        let err = PlatformError::Other("something else".to_string());
+        assert!(err.to_string().contains("something else"));
     }
 
     #[test]

@@ -3,7 +3,7 @@
 //! Uses arboard for clipboard, enigo for text input, and notify-rust for notifications.
 //! These crates provide cross-platform APIs that work on macOS.
 //!
-//! Note: Accessibility permissions are required for keyboard simulation.
+//! Note: Accessibility permissions are required for keyboard simulation and global hotkeys.
 //! The user will be prompted by macOS when first using the app.
 
 use super::{
@@ -11,7 +11,85 @@ use super::{
     TextOutput, TrayMenuEvent, TrayStatus,
 };
 use arboard::Clipboard;
+use macos_accessibility_client::accessibility;
 use std::sync::Mutex;
+use tracing::{info, warn};
+
+/// Result of accessibility permission check
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccessibilityStatus {
+    /// Accessibility is enabled
+    Granted,
+    /// Accessibility is not enabled (user needs to grant permission)
+    Denied,
+    /// Could not determine accessibility status
+    Unknown,
+}
+
+/// Check if accessibility permissions are granted.
+///
+/// OpenHush requires accessibility permissions on macOS for:
+/// - Global hotkey detection (listening for key events)
+/// - Simulating keyboard input (pasting transcribed text)
+///
+/// Returns `AccessibilityStatus::Granted` if permissions are enabled.
+pub fn check_accessibility() -> AccessibilityStatus {
+    if accessibility::application_is_trusted() {
+        AccessibilityStatus::Granted
+    } else {
+        AccessibilityStatus::Denied
+    }
+}
+
+/// Check accessibility and prompt user if not granted.
+///
+/// If accessibility is not enabled, this will trigger the macOS system prompt
+/// asking the user to grant accessibility permissions in System Preferences.
+///
+/// Returns true if accessibility is already granted, false otherwise.
+pub fn check_accessibility_with_prompt() -> bool {
+    if accessibility::application_is_trusted() {
+        true
+    } else {
+        // Trigger the system prompt
+        accessibility::application_is_trusted_with_prompt();
+        false
+    }
+}
+
+/// Open System Preferences to the Accessibility pane.
+///
+/// This is useful when you want to direct the user to the settings
+/// without triggering the system prompt.
+pub fn open_accessibility_preferences() -> Result<(), PlatformError> {
+    std::process::Command::new("open")
+        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+        .status()
+        .map_err(|e| PlatformError::Other(format!("Failed to open System Preferences: {}", e)))?;
+    Ok(())
+}
+
+/// Print accessibility permission instructions to stderr.
+pub fn print_accessibility_instructions() {
+    eprintln!();
+    eprintln!("=======================================================");
+    eprintln!("  ACCESSIBILITY PERMISSION REQUIRED");
+    eprintln!("=======================================================");
+    eprintln!();
+    eprintln!("OpenHush needs Accessibility permissions to:");
+    eprintln!("  - Detect global hotkeys (trigger recording)");
+    eprintln!("  - Paste transcribed text into applications");
+    eprintln!();
+    eprintln!("To grant permission:");
+    eprintln!("  1. Open System Preferences > Privacy & Security > Accessibility");
+    eprintln!("  2. Click the lock icon to make changes");
+    eprintln!("  3. Add OpenHush to the allowed applications");
+    eprintln!("  4. Restart OpenHush");
+    eprintln!();
+    eprintln!("Or run: open 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'");
+    eprintln!("=======================================================");
+    eprintln!();
+}
 
 pub struct MacOSPlatform {
     clipboard: Mutex<Option<Clipboard>>,
@@ -23,6 +101,34 @@ impl MacOSPlatform {
         Ok(Self {
             clipboard: Mutex::new(clipboard),
         })
+    }
+
+    /// Check and report accessibility permissions.
+    ///
+    /// Returns Ok(()) if accessibility is granted, or an error with instructions otherwise.
+    pub fn check_accessibility_permissions(&self) -> Result<(), PlatformError> {
+        match check_accessibility() {
+            AccessibilityStatus::Granted => {
+                info!("Accessibility permissions granted");
+                Ok(())
+            }
+            AccessibilityStatus::Denied => {
+                warn!("Accessibility permissions not granted");
+                print_accessibility_instructions();
+
+                // Trigger the system prompt
+                if !check_accessibility_with_prompt() {
+                    return Err(PlatformError::Accessibility(
+                        "Accessibility permission required. Please grant permission in System Preferences.".into()
+                    ));
+                }
+                Ok(())
+            }
+            AccessibilityStatus::Unknown => {
+                warn!("Could not determine accessibility status");
+                Ok(()) // Continue anyway, let macOS handle it
+            }
+        }
     }
 
     /// Paste text using clipboard + Cmd+V simulation
@@ -172,5 +278,89 @@ impl SystemTray for MacOSSystemTray {
     fn is_supported() -> bool {
         // macOS always has menu bar support
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ===================
+    // AccessibilityStatus Tests
+    // ===================
+
+    #[test]
+    fn test_accessibility_status_equality() {
+        assert_eq!(AccessibilityStatus::Granted, AccessibilityStatus::Granted);
+        assert_eq!(AccessibilityStatus::Denied, AccessibilityStatus::Denied);
+        assert_eq!(AccessibilityStatus::Unknown, AccessibilityStatus::Unknown);
+        assert_ne!(AccessibilityStatus::Granted, AccessibilityStatus::Denied);
+        assert_ne!(AccessibilityStatus::Denied, AccessibilityStatus::Unknown);
+    }
+
+    #[test]
+    fn test_accessibility_status_debug() {
+        assert_eq!(format!("{:?}", AccessibilityStatus::Granted), "Granted");
+        assert_eq!(format!("{:?}", AccessibilityStatus::Denied), "Denied");
+        assert_eq!(format!("{:?}", AccessibilityStatus::Unknown), "Unknown");
+    }
+
+    #[test]
+    fn test_accessibility_status_clone() {
+        let status = AccessibilityStatus::Granted;
+        let cloned = status;
+        assert_eq!(status, cloned);
+    }
+
+    // ===================
+    // MacOSSystemTray Tests
+    // ===================
+
+    #[test]
+    fn test_macos_system_tray_is_supported() {
+        assert!(MacOSSystemTray::is_supported());
+    }
+
+    #[test]
+    fn test_macos_system_tray_new() {
+        let tray = MacOSSystemTray::new();
+        assert!(tray.is_ok());
+    }
+
+    #[test]
+    fn test_macos_system_tray_set_status() {
+        let mut tray = MacOSSystemTray::new().unwrap();
+        tray.set_status(TrayStatus::Recording);
+        // Status is stored internally
+        assert_eq!(tray.status, TrayStatus::Recording);
+    }
+
+    #[test]
+    fn test_macos_system_tray_poll_event() {
+        let mut tray = MacOSSystemTray::new().unwrap();
+        // poll_event returns None (events handled by tray manager)
+        assert!(tray.poll_event().is_none());
+    }
+
+    // ===================
+    // MacOSPlatform Tests
+    // ===================
+
+    #[test]
+    fn test_macos_platform_display_server() {
+        let platform = MacOSPlatform::new().unwrap();
+        assert_eq!(platform.display_server(), "macOS");
+    }
+
+    #[test]
+    fn test_macos_platform_is_tty() {
+        let platform = MacOSPlatform::new().unwrap();
+        assert!(!platform.is_tty());
+    }
+
+    #[test]
+    fn test_macos_platform_default() {
+        let platform = MacOSPlatform::default();
+        assert_eq!(platform.display_server(), "macOS");
     }
 }
