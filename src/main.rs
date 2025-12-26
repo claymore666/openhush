@@ -12,6 +12,8 @@ mod engine;
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 mod gui;
 mod input;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+mod ipc;
 mod output;
 mod panic_handler;
 mod platform;

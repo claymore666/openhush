@@ -12,6 +12,8 @@ pub mod engine;
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 pub mod gui;
 pub mod input;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub mod ipc;
 pub mod output;
 pub mod panic_handler;
 pub mod platform;

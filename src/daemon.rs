@@ -15,6 +15,8 @@ use crate::engine::{WhisperEngine, WhisperError};
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 use crate::gui;
 use crate::input::{AudioMark, AudioRecorder, AudioRecorderError, HotkeyEvent, HotkeyListener};
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+use crate::ipc::{IpcCommand, IpcResponse, IpcServer};
 use crate::output::{OutputError, OutputHandler};
 use crate::platform::{CurrentPlatform, Platform};
 use crate::queue::{
@@ -410,6 +412,19 @@ impl Daemon {
             }
         };
 
+        // Initialize IPC server (macOS and Windows)
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        let ipc_server: Option<IpcServer> = match IpcServer::new() {
+            Ok(server) => Some(server),
+            Err(e) => {
+                warn!(
+                    "IPC server unavailable: {}. Continuing without IPC control.",
+                    e
+                );
+                None
+            }
+        };
+
         // Check if model exists
         let model_path = self.model_path()?;
         let effective_model = self.config.transcription.effective_model();
@@ -719,6 +734,24 @@ impl Daemon {
                                     let _ = service.emit_recording_changed().await;
                                 }
                             }
+                        }
+                    }
+                }
+            }
+
+            // Check for IPC commands (macOS and Windows)
+            #[cfg(any(target_os = "macos", target_os = "windows"))]
+            if let Some(ref server) = ipc_server {
+                if let Some((cmd, responder)) = server.try_recv() {
+                    match cmd {
+                        IpcCommand::Status => {
+                            let is_recording = !matches!(self.state, DaemonState::Idle);
+                            responder(IpcResponse::status(is_recording));
+                        }
+                        IpcCommand::Stop => {
+                            info!("Stop command received via IPC");
+                            responder(IpcResponse::ok());
+                            break; // Exit the main loop
                         }
                     }
                 }
@@ -1406,24 +1439,53 @@ fn verify_openhush_process(_pid: i32) -> bool {
 
 /// Stop the daemon
 pub async fn stop() -> Result<(), DaemonError> {
-    if !is_running() {
-        return Err(DaemonError::NotRunning);
-    }
+    // Try IPC first on macOS and Windows
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    {
+        use crate::ipc::{IpcClient, IpcCommand};
 
-    let path = pid_file()?;
-    if let Ok(pid_str) = std::fs::read_to_string(&path) {
-        if let Ok(pid) = pid_str.trim().parse::<i32>() {
-            // Validate PID is in reasonable range
-            if pid <= 0 {
-                warn!("Invalid PID {} in PID file, removing", pid);
-                if let Err(e) = std::fs::remove_file(&path) {
-                    warn!("Failed to remove invalid PID file: {}", e);
+        match IpcClient::connect() {
+            Ok(mut client) => match client.send(IpcCommand::Stop) {
+                Ok(response) => {
+                    if response.ok {
+                        info!("Stop command sent successfully via IPC");
+                        return Ok(());
+                    } else {
+                        warn!("Stop command failed: {:?}", response.error);
+                    }
                 }
+                Err(e) => {
+                    warn!("Failed to send stop command via IPC: {}", e);
+                }
+            },
+            Err(crate::ipc::IpcError::NotRunning) => {
                 return Err(DaemonError::NotRunning);
             }
+            Err(e) => {
+                warn!("Failed to connect to daemon via IPC: {}", e);
+            }
+        }
+    }
 
-            #[cfg(unix)]
-            {
+    // Linux uses SIGTERM (D-Bus is handled separately if available)
+    #[cfg(target_os = "linux")]
+    {
+        if !is_running() {
+            return Err(DaemonError::NotRunning);
+        }
+
+        let path = pid_file()?;
+        if let Ok(pid_str) = std::fs::read_to_string(&path) {
+            if let Ok(pid) = pid_str.trim().parse::<i32>() {
+                // Validate PID is in reasonable range
+                if pid <= 0 {
+                    warn!("Invalid PID {} in PID file, removing", pid);
+                    if let Err(e) = std::fs::remove_file(&path) {
+                        warn!("Failed to remove invalid PID file: {}", e);
+                    }
+                    return Err(DaemonError::NotRunning);
+                }
+
                 use nix::sys::signal::{kill, Signal};
                 use nix::unistd::Pid;
 
@@ -1446,10 +1508,6 @@ pub async fn stop() -> Result<(), DaemonError> {
                     info!("Sent SIGTERM to daemon (PID: {})", pid);
                 }
             }
-            #[cfg(not(unix))]
-            {
-                error!("Stop not implemented on this platform");
-            }
         }
     }
 
@@ -1458,6 +1516,40 @@ pub async fn stop() -> Result<(), DaemonError> {
 
 /// Check daemon status
 pub async fn status() -> Result<(), DaemonError> {
+    // Try IPC first on macOS and Windows for detailed status
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    {
+        use crate::ipc::{IpcClient, IpcCommand};
+
+        match IpcClient::connect() {
+            Ok(mut client) => match client.send(IpcCommand::Status) {
+                Ok(response) => {
+                    if response.ok {
+                        println!("OpenHush daemon is running");
+                        if let Some(version) = response.version {
+                            println!("  Version: {}", version);
+                        }
+                        if let Some(recording) = response.recording {
+                            println!("  Recording: {}", if recording { "yes" } else { "no" });
+                        }
+                        return Ok(());
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to get status via IPC: {}", e);
+                }
+            },
+            Err(crate::ipc::IpcError::NotRunning) => {
+                println!("OpenHush daemon is not running");
+                return Ok(());
+            }
+            Err(e) => {
+                warn!("Failed to connect to daemon via IPC: {}", e);
+            }
+        }
+    }
+
+    // Fallback to PID file check
     if is_running() {
         let path = pid_file()?;
         if let Ok(pid_str) = std::fs::read_to_string(&path) {
