@@ -3,9 +3,14 @@
 pub mod audio;
 pub mod hotkey;
 pub mod ring_buffer;
+#[cfg(target_os = "linux")]
+pub mod system_audio;
 
 pub use audio::{load_wav_file, AudioBuffer, AudioRecorder, AudioRecorderError};
 pub use hotkey::{HotkeyEvent, HotkeyListener, HotkeyListenerError};
 pub use ring_buffer::AudioMark;
 #[allow(unused_imports)]
 pub use ring_buffer::AudioRingBuffer;
+#[allow(unused_imports)]
+#[cfg(target_os = "linux")]
+pub use system_audio::{AudioSource, SourceInfo, SystemAudioCapture, SystemAudioError};
