@@ -18,6 +18,7 @@ mod output;
 mod panic_handler;
 mod platform;
 mod queue;
+mod secrets;
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 mod service;
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
@@ -119,6 +120,12 @@ enum Commands {
         #[command(subcommand)]
         action: ServiceAction,
     },
+
+    /// Manage secrets in system keyring
+    Secret {
+        #[command(subcommand)]
+        action: SecretAction,
+    },
 }
 
 /// Recording control actions (sent to daemon via D-Bus)
@@ -150,6 +157,38 @@ enum ServiceAction {
 
     /// Show service status
     Status,
+}
+
+/// Secret management actions
+#[derive(Subcommand)]
+enum SecretAction {
+    /// Store a secret in the system keyring
+    Set {
+        /// Name of the secret (e.g., "ollama-api", "webhook-url")
+        name: String,
+    },
+
+    /// List information about secret storage
+    List,
+
+    /// Delete a secret from the keyring
+    Delete {
+        /// Name of the secret to delete
+        name: String,
+    },
+
+    /// Show a secret value (use with caution)
+    Show {
+        /// Name of the secret to display
+        name: String,
+
+        /// Skip confirmation prompt
+        #[arg(short, long)]
+        force: bool,
+    },
+
+    /// Check if keyring is available on this system
+    Check,
 }
 
 #[derive(Subcommand)]
@@ -540,6 +579,24 @@ async fn main() -> anyhow::Result<()> {
             ServiceAction::Status => {
                 let status = service::status()?;
                 print!("{}", status);
+            }
+        },
+
+        Commands::Secret { action } => match action {
+            SecretAction::Set { name } => {
+                secrets::cli::handle_set(&name)?;
+            }
+            SecretAction::List => {
+                secrets::cli::handle_list();
+            }
+            SecretAction::Delete { name } => {
+                secrets::cli::handle_delete(&name)?;
+            }
+            SecretAction::Show { name, force } => {
+                secrets::cli::handle_show(&name, force)?;
+            }
+            SecretAction::Check => {
+                secrets::cli::handle_check();
             }
         },
     }

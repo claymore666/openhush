@@ -61,6 +61,10 @@ toml = "0.8"
 # Base64 encoding for actions
 base64 = "0.22"
 
+# Secure secret storage (platform keyrings)
+keyring = "3"
+rpassword = "7"
+
 # CLI
 clap = { version = "4", features = ["derive"] }
 
