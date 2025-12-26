@@ -38,6 +38,11 @@ Press a hotkey, speak, release — your words appear where your cursor is. Power
 - **Dark mode** — Follows your system theme (or choose manually).
 - **Crash recovery** — If something goes wrong, diagnostic reports help fix it.
 
+### Security
+- **Sandboxing** — AppArmor, SELinux, and Firejail profiles included.
+- **Minimal permissions** — Only accesses microphone, config, and models.
+- **No network** — Works fully offline (optional Ollama connection).
+
 ## Installation
 
 ### Arch Linux (AUR)
@@ -124,6 +129,21 @@ openhush recording stop             # Stop recording
 openhush recording toggle           # Toggle recording state
 openhush recording status           # Check recording status
 ```
+
+### Running with Sandbox (Linux)
+
+```bash
+# Firejail (easiest)
+firejail openhush start
+
+# With AppArmor (auto-applies if profile installed)
+openhush start
+
+# Check sandbox status
+openhush status  # Shows "Running in AppArmor sandbox"
+```
+
+See [profiles/README.md](profiles/README.md) for installation instructions.
 
 ## Choosing a Model
 

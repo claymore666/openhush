@@ -47,8 +47,8 @@ This document tracks feature availability across all supported platforms.
 
 | Feature | Linux | macOS | Windows | Issue |
 |---------|-------|-------|---------|-------|
-| System tray icon | ✅ | ❌ | ❌ | [#130](https://github.com/claymore666/openhush/issues/130), [#131](https://github.com/claymore666/openhush/issues/131) |
-| Tray menu | ✅ | ❌ | ❌ | [#130](https://github.com/claymore666/openhush/issues/130), [#131](https://github.com/claymore666/openhush/issues/131) |
+| System tray icon | ✅ | ✅ | ✅ | Closed |
+| Tray menu | ✅ | ✅ | ✅ | Closed |
 | Desktop notifications | ✅ | ✅ | ✅ | - |
 | Audio feedback beeps | ✅ | ✅ | ✅ | - |
 
@@ -71,7 +71,7 @@ This document tracks feature availability across all supported platforms.
 
 | Feature | Linux | macOS | Windows | Issue |
 |---------|-------|-------|---------|-------|
-| Preferences dialog | ✅ | ❌ | ❌ | [#129](https://github.com/claymore666/openhush/issues/129) |
+| Preferences dialog | ✅ | ✅ | ✅ | Closed |
 | Onboarding wizard | ❌ | ❌ | ❌ | [#76](https://github.com/claymore666/openhush/issues/76) |
 
 ---
@@ -80,9 +80,12 @@ This document tracks feature availability across all supported platforms.
 
 | Feature | Linux | macOS | Windows | Issue |
 |---------|-------|-------|---------|-------|
-| Microphone permission | Auto | ❌ | Auto | [#134](https://github.com/claymore666/openhush/issues/134) |
-| Accessibility permission | N/A | ❌ | N/A | [#134](https://github.com/claymore666/openhush/issues/134) |
-| AppArmor/SELinux profiles | 🔶 | N/A | N/A | [#94](https://github.com/claymore666/openhush/issues/94) |
+| Microphone permission | Auto | ✅ | Auto | Closed |
+| Accessibility permission | N/A | ✅ | N/A | Closed |
+| AppArmor profile | ✅ | N/A | N/A | Closed |
+| SELinux policy | ✅ | N/A | N/A | Closed |
+| Firejail profile | ✅ | N/A | N/A | Closed |
+| Sandbox detection | ✅ | N/A | N/A | Closed |
 | Keyring integration | ❌ | ❌ | ❌ | [#96](https://github.com/claymore666/openhush/issues/96) |
 
 ---
@@ -133,19 +136,24 @@ This document tracks feature availability across all supported platforms.
 
 ## Priority Porting Tasks
 
-### High Priority (v0.6.0)
+### Completed in v0.6.0
 
-1. **System Tray for Windows/macOS** ([#130](https://github.com/claymore666/openhush/issues/130), [#131](https://github.com/claymore666/openhush/issues/131))
-   - Required for desktop integration
-   - Use `tray-icon` crate (cross-platform)
+1. ~~**System Tray for Windows/macOS**~~ ✅
+   - Windows: `tray-icon` crate
+   - macOS: `tray-icon` crate with menu bar integration
 
-2. **Preferences GUI for Windows/macOS** ([#129](https://github.com/claymore666/openhush/issues/129))
-   - Currently Linux-only (GTK)
-   - Consider egui for cross-platform GUI
+2. ~~**Preferences GUI for Windows/macOS**~~ ✅
+   - Cross-platform egui implementation
 
-3. **macOS Accessibility Permission** ([#134](https://github.com/claymore666/openhush/issues/134))
-   - Required for auto-paste functionality
-   - Must prompt user and guide through System Preferences
+3. ~~**macOS Accessibility Permission**~~ ✅
+   - Uses `macos-accessibility-client` crate
+   - Prompts user and guides to System Preferences
+
+4. ~~**Security Sandboxing (Linux)**~~ ✅
+   - AppArmor profile for Ubuntu/Debian/SUSE
+   - SELinux policy for Fedora/RHEL
+   - Firejail profile for any distro
+   - Runtime sandbox detection
 
 ### Medium Priority (v0.7.0)
 
@@ -175,16 +183,24 @@ This document tracks feature availability across all supported platforms.
 | Platform | Library | Status |
 |----------|---------|--------|
 | Linux | `ksni` (D-Bus StatusNotifierItem) | ✅ Implemented |
-| macOS | `tray-icon` or native AppKit | ❌ Stub only |
-| Windows | `tray-icon` or native WinAPI | ❌ Stub only |
+| macOS | `tray-icon` | ✅ Implemented |
+| Windows | `tray-icon` | ✅ Implemented |
 
 ### GUI Toolkit
 
-| Platform | Current | Recommended |
-|----------|---------|-------------|
-| Linux | GTK3 (egui planned) | Keep GTK or migrate to egui |
-| macOS | None | egui (cross-platform) |
-| Windows | None | egui (cross-platform) |
+| Platform | Library | Status |
+|----------|---------|--------|
+| Linux | `egui` + `eframe` | ✅ Implemented |
+| macOS | `egui` + `eframe` | ✅ Implemented |
+| Windows | `egui` + `eframe` | ✅ Implemented |
+
+### Security Sandboxing
+
+| Platform | Profiles | Status |
+|----------|----------|--------|
+| Linux | AppArmor, SELinux, Firejail | ✅ Implemented |
+| macOS | App Sandbox (future) | ❌ Not implemented |
+| Windows | N/A | N/A |
 
 ### Hotkey Handling
 

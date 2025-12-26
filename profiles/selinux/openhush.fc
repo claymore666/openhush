@@ -1,0 +1,20 @@
+# SELinux file contexts for OpenHush
+#
+# Install with:
+#   sudo semanage fcontext -a -t openhush_exec_t '/usr/bin/openhush'
+#   sudo semanage fcontext -a -t openhush_conf_t '/home/[^/]+/\.config/openhush(/.*)?'
+#   sudo semanage fcontext -a -t openhush_data_t '/home/[^/]+/\.local/share/openhush(/.*)?'
+#   sudo restorecon -Rv /usr/bin/openhush ~/.config/openhush ~/.local/share/openhush
+
+# Binary
+/usr/bin/openhush               --      gen_context(system_u:object_r:openhush_exec_t,s0)
+/usr/local/bin/openhush         --      gen_context(system_u:object_r:openhush_exec_t,s0)
+
+# Configuration
+HOME_DIR/\.config/openhush(/.*)?        gen_context(system_u:object_r:openhush_conf_t,s0)
+
+# Data (models, logs, cache)
+HOME_DIR/\.local/share/openhush(/.*)?   gen_context(system_u:object_r:openhush_data_t,s0)
+
+# Runtime
+/run/user/[0-9]+/openhush\.pid  --      gen_context(system_u:object_r:openhush_var_run_t,s0)

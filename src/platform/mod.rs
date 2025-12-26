@@ -18,6 +18,9 @@ mod macos;
 mod windows;
 
 #[cfg(target_os = "linux")]
+pub mod sandbox;
+
+#[cfg(target_os = "linux")]
 pub use linux::LinuxPlatform as CurrentPlatform;
 #[cfg(target_os = "macos")]
 pub use macos::MacOSPlatform as CurrentPlatform;

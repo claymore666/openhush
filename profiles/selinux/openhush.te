@@ -1,0 +1,158 @@
+# SELinux Type Enforcement policy for OpenHush
+#
+# Build and install:
+#   checkmodule -M -m -o openhush.mod openhush.te
+#   semodule_package -o openhush.pp -m openhush.mod
+#   sudo semodule -i openhush.pp
+#
+# Label the binary:
+#   sudo semanage fcontext -a -t openhush_exec_t '/usr/bin/openhush'
+#   sudo restorecon -v /usr/bin/openhush
+#
+# Remove:
+#   sudo semodule -r openhush
+
+policy_module(openhush, 1.0.0)
+
+########################################
+# Declarations
+########################################
+
+type openhush_t;
+type openhush_exec_t;
+
+# Mark as an application domain
+application_domain(openhush_t, openhush_exec_t)
+
+# Config and data file types
+type openhush_conf_t;
+type openhush_data_t;
+type openhush_log_t;
+type openhush_tmp_t;
+
+# File context definitions
+files_type(openhush_conf_t)
+files_type(openhush_data_t)
+logging_log_file(openhush_log_t)
+files_tmp_file(openhush_tmp_t)
+
+########################################
+# Local policy - openhush_t
+########################################
+
+# Allow transition from user domain
+allow openhush_t self:process { signal sigkill sigstop signull };
+allow openhush_t self:fifo_file rw_fifo_file_perms;
+allow openhush_t self:unix_stream_socket create_stream_socket_perms;
+allow openhush_t self:tcp_socket create_stream_socket_perms;
+
+# Configuration files (~/.config/openhush/)
+allow openhush_t openhush_conf_t:dir manage_dir_perms;
+allow openhush_t openhush_conf_t:file manage_file_perms;
+
+# Data files (~/.local/share/openhush/)
+allow openhush_t openhush_data_t:dir manage_dir_perms;
+allow openhush_t openhush_data_t:file manage_file_perms;
+
+# Log files
+allow openhush_t openhush_log_t:dir manage_dir_perms;
+allow openhush_t openhush_log_t:file manage_file_perms;
+logging_log_filetrans(openhush_t, openhush_log_t, file)
+
+# Temporary files
+allow openhush_t openhush_tmp_t:dir manage_dir_perms;
+allow openhush_t openhush_tmp_t:file manage_file_perms;
+files_tmp_filetrans(openhush_t, openhush_tmp_t, { file dir })
+
+########################################
+# Audio access (microphone)
+########################################
+
+# ALSA sound devices
+dev_rw_sound(openhush_t)
+
+# PulseAudio
+pulseaudio_run(openhush_t, openhush_t)
+
+# PipeWire (usually runs in user session)
+gen_require(`
+    type user_tmp_t;
+')
+allow openhush_t user_tmp_t:sock_file write;
+
+########################################
+# GPU access (CUDA/ROCm)
+########################################
+
+# NVIDIA GPU
+nvidia_domain(openhush_t)
+
+# Generic GPU/DRI access
+dev_rw_dri(openhush_t)
+
+# /proc/driver/nvidia
+kernel_read_system_state(openhush_t)
+
+########################################
+# Network (localhost only for Ollama)
+########################################
+
+# Allow TCP connections (for Ollama API on localhost)
+corenet_tcp_connect_all_ports(openhush_t)
+corenet_tcp_bind_generic_node(openhush_t)
+
+# DNS resolution
+sysnet_dns_name_resolve(openhush_t)
+
+########################################
+# D-Bus (notifications, tray)
+########################################
+
+dbus_session_bus_client(openhush_t)
+dbus_connect_session_bus(openhush_t)
+
+# Send notifications
+optional_policy(`
+    gen_require(`
+        type session_dbusd_t;
+    ')
+    allow openhush_t session_dbusd_t:dbus send_msg;
+')
+
+########################################
+# X11/Wayland (clipboard, paste)
+########################################
+
+# X11 socket access
+xserver_user_x_domain_template(openhush, openhush_t, openhush_tmpfs_t)
+
+# Wayland
+gen_require(`
+    type xdg_runtime_t;
+')
+allow openhush_t xdg_runtime_t:dir search;
+allow openhush_t xdg_runtime_t:sock_file write;
+
+########################################
+# Misc system access
+########################################
+
+# Read system info
+files_read_etc_files(openhush_t)
+kernel_read_system_state(openhush_t)
+dev_read_sysfs(openhush_t)
+
+# User home directory (limited)
+userdom_search_user_home_dirs(openhush_t)
+
+# Execute helper tools (xdotool, wtype)
+corecmd_exec_bin(openhush_t)
+
+########################################
+# File contexts
+########################################
+
+# Define file contexts (for semanage fcontext)
+# /usr/bin/openhush              -- openhush_exec_t
+# ~/.config/openhush(/.*)?       -- openhush_conf_t
+# ~/.local/share/openhush(/.*)?  -- openhush_data_t

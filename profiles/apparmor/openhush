@@ -1,0 +1,182 @@
+# AppArmor profile for OpenHush
+# Install: sudo cp profiles/apparmor/openhush /etc/apparmor.d/usr.bin.openhush
+# Enable:  sudo apparmor_parser -r /etc/apparmor.d/usr.bin.openhush
+# Disable: sudo apparmor_parser -R /etc/apparmor.d/usr.bin.openhush
+
+abi <abi/3.0>,
+
+#include <tunables/global>
+
+profile openhush /usr/bin/openhush flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+  #include <abstractions/nameservice>
+
+  # ===================
+  # Binary and libraries
+  # ===================
+  /usr/bin/openhush mr,
+  /usr/lib/** mr,
+  /usr/lib64/** mr,
+  /lib/** mr,
+  /lib64/** mr,
+
+  # Rust/cargo libs (for development builds)
+  owner @{HOME}/.cargo/** mr,
+  owner @{HOME}/.rustup/** mr,
+
+  # ===================
+  # Configuration
+  # ===================
+  owner @{HOME}/.config/openhush/ rw,
+  owner @{HOME}/.config/openhush/** rw,
+
+  # ===================
+  # Data directory (models, logs, cache)
+  # ===================
+  owner @{HOME}/.local/share/openhush/ rw,
+  owner @{HOME}/.local/share/openhush/** rw,
+
+  # ===================
+  # Runtime files (PID, sockets)
+  # ===================
+  owner /run/user/@{uid}/openhush.pid rw,
+  owner /run/user/@{uid}/openhush/ rw,
+  owner /run/user/@{uid}/openhush/** rw,
+
+  # ===================
+  # Temporary files
+  # ===================
+  owner /tmp/openhush* rw,
+  owner /tmp/.openhush* rw,
+  /tmp/ r,
+
+  # ===================
+  # Audio devices (microphone capture)
+  # ===================
+  /dev/snd/ r,
+  /dev/snd/* rw,
+  /proc/asound/** r,
+  @{sys}/class/sound/ r,
+  @{sys}/devices/**/sound/** r,
+
+  # PulseAudio
+  owner @{HOME}/.config/pulse/ r,
+  owner @{HOME}/.config/pulse/** r,
+  owner /run/user/@{uid}/pulse/ rw,
+  owner /run/user/@{uid}/pulse/** rw,
+  /etc/pulse/** r,
+  /usr/share/pulseaudio/** r,
+
+  # PipeWire
+  owner /run/user/@{uid}/pipewire-0 rw,
+  owner /run/user/@{uid}/pipewire-0-manager rw,
+  /etc/pipewire/** r,
+  /usr/share/pipewire/** r,
+
+  # ===================
+  # GPU access (CUDA/ROCm/Vulkan)
+  # ===================
+  # NVIDIA
+  /dev/nvidia* rw,
+  /dev/nvidiactl rw,
+  /dev/nvidia-modeset rw,
+  /dev/nvidia-uvm rw,
+  /dev/nvidia-uvm-tools rw,
+  @{sys}/bus/pci/devices/ r,
+  @{sys}/devices/pci**/ r,
+  @{sys}/devices/pci**/** r,
+  /proc/driver/nvidia/** r,
+  /usr/share/nvidia/** r,
+  /etc/nvidia/** r,
+
+  # AMD ROCm
+  /dev/kfd rw,
+  /dev/dri/ r,
+  /dev/dri/* rw,
+  @{sys}/class/drm/ r,
+  @{sys}/devices/**/drm/** r,
+  /opt/rocm/** mr,
+
+  # Vulkan
+  /etc/vulkan/** r,
+  /usr/share/vulkan/** r,
+  @{HOME}/.config/vulkan/** r,
+
+  # Mesa/OpenGL
+  /usr/share/glvnd/** r,
+  /usr/share/drirc.d/** r,
+
+  # ===================
+  # D-Bus (notifications, portals)
+  # ===================
+  #include <abstractions/dbus-session-strict>
+
+  dbus send bus=session path=/org/freedesktop/Notifications
+       interface=org.freedesktop.Notifications
+       member={GetCapabilities,GetServerInformation,Notify,CloseNotification},
+
+  dbus send bus=session path=/org/freedesktop/portal/*
+       interface=org.freedesktop.portal.*,
+
+  dbus receive bus=session path=/org/freedesktop/Notifications
+       interface=org.freedesktop.Notifications,
+
+  # StatusNotifierItem (system tray)
+  dbus send bus=session path=/StatusNotifierWatcher
+       interface=org.kde.StatusNotifierWatcher,
+  dbus send bus=session path=/StatusNotifierItem
+       interface=org.kde.StatusNotifierItem,
+
+  # ===================
+  # Network (localhost only - Ollama API)
+  # ===================
+  network inet stream,
+  network inet6 stream,
+  network unix stream,
+
+  # DNS resolution
+  /etc/resolv.conf r,
+  /etc/hosts r,
+  /etc/nsswitch.conf r,
+  /etc/gai.conf r,
+
+  # ===================
+  # X11/Wayland (clipboard, paste)
+  # ===================
+  # X11
+  /tmp/.X11-unix/* rw,
+  owner @{HOME}/.Xauthority r,
+  /etc/X11/** r,
+
+  # Wayland
+  owner /run/user/@{uid}/wayland-* rw,
+  owner @{HOME}/.config/wtype/** r,
+
+  # xdotool/wtype for paste simulation
+  /usr/bin/xdotool Px,
+  /usr/bin/wtype Px,
+
+  # ===================
+  # System information
+  # ===================
+  /proc/sys/kernel/osrelease r,
+  /proc/sys/kernel/random/uuid r,
+  /proc/cpuinfo r,
+  /proc/meminfo r,
+  /proc/self/** r,
+  /sys/devices/system/cpu/** r,
+  /etc/machine-id r,
+  /var/lib/dbus/machine-id r,
+
+  # ===================
+  # Deny sensitive paths
+  # ===================
+  deny /etc/shadow r,
+  deny /etc/gshadow r,
+  deny @{HOME}/.ssh/** rwx,
+  deny @{HOME}/.gnupg/** rwx,
+  deny @{HOME}/.mozilla/** rwx,
+  deny @{HOME}/.config/chromium/** rwx,
+  deny @{HOME}/.config/google-chrome/** rwx,
+  deny @{HOME}/.local/share/keyrings/** rwx,
+}
