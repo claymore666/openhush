@@ -70,6 +70,10 @@ pub struct Config {
     /// App-specific profiles for context-aware settings
     #[serde(default)]
     pub profiles: Vec<AppProfile>,
+
+    /// Speaker diarization settings
+    #[serde(default)]
+    pub diarization: DiarizationConfig,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -215,6 +219,41 @@ impl Default for VocabularyConfig {
 
 fn default_vocabulary_reload_interval() -> u32 {
     5 // Check for changes every 5 seconds
+}
+
+/// Speaker diarization configuration
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct DiarizationConfig {
+    /// Enable speaker diarization in record mode
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Maximum number of speakers to detect (1-10)
+    #[serde(default = "default_max_speakers")]
+    pub max_speakers: usize,
+
+    /// Similarity threshold for speaker matching (0.0 - 1.0)
+    /// Higher = stricter matching, more speakers detected
+    #[serde(default = "default_similarity_threshold")]
+    pub similarity_threshold: f32,
+}
+
+impl Default for DiarizationConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_speakers: default_max_speakers(),
+            similarity_threshold: default_similarity_threshold(),
+        }
+    }
+}
+
+fn default_max_speakers() -> usize {
+    6
+}
+
+fn default_similarity_threshold() -> f32 {
+    0.5
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
