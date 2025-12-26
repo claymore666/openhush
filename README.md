@@ -38,12 +38,39 @@ Press a hotkey, speak, release — your words appear where your cursor is. Power
 - **Dark mode** — Follows your system theme (or choose manually).
 - **Crash recovery** — If something goes wrong, diagnostic reports help fix it.
 
+## Installation
+
+### Arch Linux (AUR)
+
+```bash
+# Using yay
+yay -S openhush
+
+# Or for latest development version
+yay -S openhush-git
+```
+
+### Flatpak
+
+```bash
+# Coming soon to Flathub
+flatpak install flathub org.openhush.OpenHush
+```
+
+### From Source
+
+```bash
+git clone https://github.com/claymore666/openhush.git
+cd openhush
+cargo build --release --features cuda  # or: hipblas, metal, vulkan
+sudo cp target/release/openhush /usr/local/bin/
+```
+
+See [Building from Source](#building-from-source) for detailed instructions.
+
 ## Quick Start
 
 ```bash
-# Install (requires Rust)
-cargo install openhush
-
 # Download a model (first time only)
 openhush model download small
 
@@ -72,6 +99,14 @@ openhush model download medium      # Download a model
 openhush model remove tiny          # Delete a model
 ```
 
+### File Transcription
+
+```bash
+openhush transcribe meeting.wav              # Transcribe a file
+openhush transcribe recording.mp3 -o json    # Output as JSON
+openhush transcribe --model large-v3 file.wav  # Use specific model
+```
+
 ### Configuration
 
 ```bash
@@ -79,6 +114,15 @@ openhush config --show              # View current settings
 openhush config --hotkey F12        # Change hotkey
 openhush config --model large-v3    # Use most accurate model
 openhush config --language de       # Set language (or "auto")
+```
+
+### D-Bus Control (Linux)
+
+```bash
+openhush recording start            # Start recording via D-Bus
+openhush recording stop             # Stop recording
+openhush recording toggle           # Toggle recording state
+openhush recording status           # Check recording status
 ```
 
 ## Choosing a Model
@@ -211,6 +255,15 @@ sudo dnf install alsa-lib-devel dbus-devel
 sudo pacman -S alsa-lib dbus
 ```
 
+## Documentation
+
+For detailed documentation, visit the **[OpenHush Wiki](https://github.com/claymore666/openhush/wiki)**:
+
+- [Architecture](https://github.com/claymore666/openhush/wiki/Architecture) — System overview and data flow
+- [Components](https://github.com/claymore666/openhush/wiki/Components) — Module documentation
+- [Product Vision](https://github.com/claymore666/openhush/wiki/Product-Vision) — Roadmap and future plans
+- [User Guide](https://github.com/claymore666/openhush/wiki/User-Guide) — Detailed usage instructions
+
 ## Roadmap
 
 ### Coming Soon
@@ -219,11 +272,11 @@ sudo pacman -S alsa-lib dbus
 - App-specific settings (different config per application)
 - Plugin system for community extensions
 
-### Packaging
-- Flatpak
-- AUR (Arch User Repository)
-- Homebrew (macOS)
-- Chocolatey/winget (Windows)
+### Packaging Status
+- ✅ AUR (Arch User Repository)
+- ✅ Flatpak (ready, pending Flathub submission)
+- ⏳ Homebrew (macOS)
+- ⏳ Chocolatey/winget (Windows)
 
 See the [GitHub milestones](https://github.com/claymore666/openhush/milestones) for detailed plans.
 
