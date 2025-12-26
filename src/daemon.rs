@@ -1207,9 +1207,9 @@ pub async fn run(foreground: bool, enable_tray: bool) -> Result<(), DaemonError>
         {
             daemonize_process()?;
         }
-        #[cfg(not(unix))]
+        #[cfg(windows)]
         {
-            warn!("Background mode not supported on this platform, running in foreground");
+            hide_console_window();
         }
     }
 
@@ -1221,6 +1221,23 @@ pub async fn run(foreground: bool, enable_tray: bool) -> Result<(), DaemonError>
     remove_pid()?;
 
     result
+}
+
+/// Hide the console window on Windows for background daemon mode
+#[cfg(windows)]
+fn hide_console_window() {
+    use windows_sys::Win32::System::Console::{FreeConsole, GetConsoleWindow};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
+
+    unsafe {
+        let console_window = GetConsoleWindow();
+        if !console_window.is_null() {
+            // First hide the window, then detach from console
+            ShowWindow(console_window, SW_HIDE);
+            FreeConsole();
+            info!("Console window hidden for background operation");
+        }
+    }
 }
 
 /// Perform Unix daemonization using nix crate

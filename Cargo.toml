@@ -108,6 +108,8 @@ zbus = "5"
 tray-icon = "0.19"
 # Windows message loop
 winit = { version = "0.30", default-features = false, features = ["rwh_06"] }
+# Windows API for console hiding
+windows-sys = { version = "0.59", features = ["Win32_System_Console", "Win32_UI_WindowsAndMessaging", "Win32_Foundation"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Cross-platform system tray
