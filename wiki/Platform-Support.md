@@ -60,7 +60,7 @@ This document tracks feature availability across all supported platforms.
 |---------|-------|-------|---------|-------|
 | Daemon mode | ✅ | ✅ | ✅ | - |
 | D-Bus control | ✅ | N/A | N/A | - |
-| IPC control (pipes/socket) | N/A | ❌ | ❌ | [#135](https://github.com/claymore666/openhush/issues/135) |
+| IPC control (pipes/socket) | N/A | ✅ | ✅ | Closed |
 | Systemd service | ✅ | N/A | N/A | - |
 | LaunchAgent | N/A | ❌ | N/A | [#133](https://github.com/claymore666/openhush/issues/133) |
 | Windows Service | N/A | N/A | ❌ | [#132](https://github.com/claymore666/openhush/issues/132) |
@@ -155,23 +155,23 @@ This document tracks feature availability across all supported platforms.
    - Firejail profile for any distro
    - Runtime sandbox detection
 
+5. ~~**IPC Control for Windows/macOS**~~ ✅
+   - Unix sockets for macOS, named pipes for Windows
+   - `openhush status` and `openhush stop` now work on all platforms
+
 ### Medium Priority (v0.7.0)
 
-4. **IPC Control for Windows/macOS** ([#135](https://github.com/claymore666/openhush/issues/135))
-   - D-Bus alternative using named pipes (Windows) or Unix sockets (macOS)
-   - Enable `openhush status`, `openhush stop` commands
-
-5. **Windows Service** ([#132](https://github.com/claymore666/openhush/issues/132))
+6. **Windows Service** ([#132](https://github.com/claymore666/openhush/issues/132))
    - Auto-start on login
    - Background operation without console window
 
-6. **macOS LaunchAgent** ([#133](https://github.com/claymore666/openhush/issues/133))
+7. **macOS LaunchAgent** ([#133](https://github.com/claymore666/openhush/issues/133))
    - Auto-start on login
    - Proper macOS service lifecycle
 
 ### Low Priority (Future)
 
-7. **Keyring Integration** ([#96](https://github.com/claymore666/openhush/issues/96))
+8. **Keyring Integration** ([#96](https://github.com/claymore666/openhush/issues/96))
    - macOS Keychain, Windows Credential Manager, Linux Secret Service
 
 ---
