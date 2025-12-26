@@ -19,6 +19,8 @@ pub mod panic_handler;
 pub mod platform;
 pub mod queue;
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+pub mod service;
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 pub mod tray;
 pub mod vad;
 pub mod vocabulary;

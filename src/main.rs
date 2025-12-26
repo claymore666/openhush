@@ -19,6 +19,8 @@ mod panic_handler;
 mod platform;
 mod queue;
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+mod service;
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 mod tray;
 mod vad;
 mod vocabulary;
@@ -110,6 +112,13 @@ enum Commands {
         #[command(subcommand)]
         action: RecordingAction,
     },
+
+    /// Manage autostart service
+    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+    Service {
+        #[command(subcommand)]
+        action: ServiceAction,
+    },
 }
 
 /// Recording control actions (sent to daemon via D-Bus)
@@ -126,6 +135,20 @@ enum RecordingAction {
     Toggle,
 
     /// Show current recording status
+    Status,
+}
+
+/// Service management actions
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+#[derive(Subcommand)]
+enum ServiceAction {
+    /// Install autostart service (run on login)
+    Install,
+
+    /// Remove autostart service
+    Uninstall,
+
+    /// Show service status
     Status,
 }
 
@@ -505,6 +528,20 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         }
+
+        #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+        Commands::Service { action } => match action {
+            ServiceAction::Install => {
+                service::install()?;
+            }
+            ServiceAction::Uninstall => {
+                service::uninstall()?;
+            }
+            ServiceAction::Status => {
+                let status = service::status()?;
+                print!("{}", status);
+            }
+        },
     }
 
     Ok(())

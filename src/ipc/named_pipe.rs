@@ -4,15 +4,75 @@ use super::{IpcCommand, IpcError, IpcResponse};
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
 use tracing::{debug, info, warn};
-use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
-use windows_sys::Win32::Storage::FileSystem::{CreateFileW, ReadFile, WriteFile, OPEN_EXISTING};
-use windows_sys::Win32::System::Pipes::{
-    ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_ACCESS_DUPLEX,
-    PIPE_READMODE_BYTE, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
-};
+
+// Windows API types
+type HANDLE = isize;
+const INVALID_HANDLE_VALUE: HANDLE = -1;
+
+// File access flags
+const GENERIC_READ: u32 = 0x80000000;
+const GENERIC_WRITE: u32 = 0x40000000;
+const OPEN_EXISTING: u32 = 3;
+
+// Pipe constants
+const PIPE_ACCESS_DUPLEX: u32 = 0x00000003;
+const PIPE_TYPE_BYTE: u32 = 0x00000000;
+const PIPE_READMODE_BYTE: u32 = 0x00000000;
+const PIPE_WAIT: u32 = 0x00000000;
+const PIPE_UNLIMITED_INSTANCES: u32 = 255;
+const ERROR_PIPE_CONNECTED: u32 = 535;
 
 const PIPE_NAME: &str = r"\\.\pipe\openhush";
 const BUFFER_SIZE: u32 = 4096;
+
+// Windows API bindings
+#[link(name = "kernel32")]
+extern "system" {
+    fn CreateNamedPipeW(
+        name: *const u16,
+        open_mode: u32,
+        pipe_mode: u32,
+        max_instances: u32,
+        out_buffer_size: u32,
+        in_buffer_size: u32,
+        default_timeout: u32,
+        security_attributes: *mut std::ffi::c_void,
+    ) -> HANDLE;
+
+    fn ConnectNamedPipe(pipe: HANDLE, overlapped: *mut std::ffi::c_void) -> i32;
+
+    fn DisconnectNamedPipe(pipe: HANDLE) -> i32;
+
+    fn CreateFileW(
+        file_name: *const u16,
+        desired_access: u32,
+        share_mode: u32,
+        security_attributes: *mut std::ffi::c_void,
+        creation_disposition: u32,
+        flags_and_attributes: u32,
+        template_file: HANDLE,
+    ) -> HANDLE;
+
+    fn ReadFile(
+        file: HANDLE,
+        buffer: *mut u8,
+        bytes_to_read: u32,
+        bytes_read: *mut u32,
+        overlapped: *mut std::ffi::c_void,
+    ) -> i32;
+
+    fn WriteFile(
+        file: HANDLE,
+        buffer: *const u8,
+        bytes_to_write: u32,
+        bytes_written: *mut u32,
+        overlapped: *mut std::ffi::c_void,
+    ) -> i32;
+
+    fn CloseHandle(handle: HANDLE) -> i32;
+
+    fn GetLastError() -> u32;
+}
 
 /// IPC server using Windows named pipe.
 pub struct IpcServer {
@@ -55,9 +115,8 @@ impl IpcServer {
 
         if connected == 0 {
             // Check if client already connected
-            let error = unsafe { windows_sys::Win32::Foundation::GetLastError() };
-            if error != 535 {
-                // ERROR_PIPE_CONNECTED
+            let error = unsafe { GetLastError() };
+            if error != ERROR_PIPE_CONNECTED {
                 return None;
             }
         }
@@ -69,7 +128,7 @@ impl IpcServer {
         let read_ok = unsafe {
             ReadFile(
                 self.pipe,
-                buffer.as_mut_ptr() as *mut _,
+                buffer.as_mut_ptr(),
                 BUFFER_SIZE,
                 &mut bytes_read,
                 std::ptr::null_mut(),
@@ -96,7 +155,7 @@ impl IpcServer {
                         unsafe {
                             WriteFile(
                                 pipe,
-                                bytes.as_ptr() as *const _,
+                                bytes.as_ptr(),
                                 bytes.len() as u32,
                                 &mut written,
                                 std::ptr::null_mut(),
@@ -138,12 +197,12 @@ impl IpcClient {
         let pipe = unsafe {
             CreateFileW(
                 pipe_name.as_ptr(),
-                0x80000000 | 0x40000000, // GENERIC_READ | GENERIC_WRITE
+                GENERIC_READ | GENERIC_WRITE,
                 0,
                 std::ptr::null_mut(),
                 OPEN_EXISTING,
                 0,
-                std::ptr::null_mut(),
+                0,
             )
         };
 
@@ -164,7 +223,7 @@ impl IpcClient {
         let write_ok = unsafe {
             WriteFile(
                 self.pipe,
-                bytes.as_ptr() as *const _,
+                bytes.as_ptr(),
                 bytes.len() as u32,
                 &mut written,
                 std::ptr::null_mut(),
@@ -182,7 +241,7 @@ impl IpcClient {
         let read_ok = unsafe {
             ReadFile(
                 self.pipe,
-                buffer.as_mut_ptr() as *mut _,
+                buffer.as_mut_ptr(),
                 BUFFER_SIZE,
                 &mut bytes_read,
                 std::ptr::null_mut(),
