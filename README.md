@@ -308,8 +308,9 @@ For detailed documentation, visit the **[OpenHush Wiki](https://github.com/claym
 ### Packaging Status
 - ✅ AUR (Arch User Repository)
 - ✅ Flatpak (ready, pending Flathub submission)
-- ⏳ Homebrew (macOS)
-- ⏳ Chocolatey/winget (Windows)
+- ✅ Homebrew (macOS)
+- ✅ DMG installer (macOS)
+- ✅ MSI installer (Windows)
 
 See the [GitHub milestones](https://github.com/claymore666/openhush/milestones) for detailed plans.
 
