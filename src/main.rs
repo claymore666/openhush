@@ -55,6 +55,10 @@ enum Commands {
     /// Open preferences GUI
     Preferences,
 
+    /// Run the first-run setup wizard
+    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+    Setup,
+
     /// Stop the running daemon
     Stop,
 
@@ -303,6 +307,13 @@ async fn main() -> anyhow::Result<()> {
             foreground,
             no_tray,
         } => {
+            // Check for first run and launch setup wizard if needed
+            #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+            if gui::is_first_run() {
+                info!("First run detected, launching setup wizard...");
+                gui::run_wizard()?;
+            }
+
             info!("Starting OpenHush daemon...");
             daemon::run(foreground, !no_tray).await?;
         }
@@ -310,6 +321,12 @@ async fn main() -> anyhow::Result<()> {
         Commands::Preferences => {
             info!("Opening preferences...");
             gui::run_preferences()?;
+        }
+
+        #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+        Commands::Setup => {
+            info!("Running setup wizard...");
+            gui::run_wizard()?;
         }
 
         Commands::Stop => {

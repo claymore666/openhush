@@ -1,4 +1,11 @@
-//! GUI preferences window using egui.
+//! GUI components using egui.
+//!
+//! - Preferences window for configuration
+//! - First-run onboarding wizard
+
+mod wizard;
+
+pub use wizard::{is_first_run, run_wizard};
 
 use crate::config::{Config, Theme};
 use eframe::egui;
