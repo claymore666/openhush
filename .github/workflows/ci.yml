@@ -202,7 +202,7 @@ jobs:
       # macOS dependencies (CMake for whisper-rs)
       - name: Install macOS dependencies
         if: runner.os == 'macOS'
-        run: brew install cmake
+        run: brew list cmake &>/dev/null || brew install cmake
 
       # Windows dependencies (CMake for whisper-rs)
       - name: Install Windows dependencies

@@ -82,7 +82,7 @@ jobs:
       - name: Install macOS dependencies
         if: runner.os == 'macOS'
         run: |
-          brew install openssl@3
+          brew list openssl@3 &>/dev/null || brew install openssl@3
 
       # Windows dependencies
       - name: Install Windows dependencies
@@ -256,7 +256,7 @@ jobs:
           chmod +x openhush
 
       - name: Install create-dmg
-        run: brew install create-dmg
+        run: brew list create-dmg &>/dev/null || brew install create-dmg
 
       - name: Build DMG
         run: |
