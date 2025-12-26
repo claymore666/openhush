@@ -4,15 +4,35 @@ All notable changes to OpenHush are documented here.
 
 ## [Unreleased]
 
-### Multi-GPU Support
+---
 
-This release adds support for AMD and Apple Silicon GPUs.
+## [0.5.0] - 2025-12-26
+
+### Packaging & Distribution
+
+This release makes OpenHush easy to install on any platform.
 
 **What's New:**
 
-- **AMD GPU Support** — Build with `--features hipblas` for AMD ROCm/HIP acceleration
-- **Apple Metal Support** — Build with `--features metal` for native Apple Silicon performance
-- **Vulkan Backend** — Build with `--features vulkan` for cross-platform GPU acceleration
+- **D-Bus Service Mode** — Control the daemon via D-Bus (`openhush status`, `openhush stop`)
+- **Multi-GPU Support** — AMD (HIP), Apple Metal, and Vulkan backends
+- **Flatpak Package** — Install from Flathub (coming soon)
+- **AUR Package** — Install on Arch Linux with `yay -S openhush`
+- **Debian Package** — Install on Ubuntu/Debian with `.deb`
+- **Homebrew Formula** — Install on macOS with `brew install openhush`
+- **DMG Installer** — Drag-and-drop installation for macOS
+- **MSI Installer** — Windows installer with Start Menu integration
+
+**Documentation:**
+
+- Comprehensive [Wiki](https://github.com/claymore666/openhush/wiki) with architecture docs
+- Platform support matrix tracking feature availability
+- Market analysis and product vision roadmap
+
+**CI/CD:**
+
+- Automated package builds for all platforms on release
+- Checksums for all release artifacts
 
 ---
 
