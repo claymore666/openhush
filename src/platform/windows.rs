@@ -24,21 +24,20 @@ impl WindowsPlatform {
         })
     }
 
-    /// Paste text using clipboard + Ctrl+V simulation
-    fn paste_via_clipboard(&self, text: &str) -> Result<(), PlatformError> {
-        // Copy to clipboard first
-        self.copy_to_clipboard(text)?;
+    /// Paste text using enigo direct typing (instant)
+    fn paste_via_enigo(&self, text: &str) -> Result<(), PlatformError> {
+        use enigo::{Enigo, Keyboard, Settings};
 
-        // Simulate Ctrl+V using PowerShell and SendKeys
-        // This is more reliable than enigo for cross-application pasting
-        std::process::Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-Command",
-                "[System.Windows.Forms.SendKeys]::SendWait('^v')",
-            ])
-            .status()
-            .map_err(|e| PlatformError::Paste(format!("PowerShell SendKeys failed: {}", e)))?;
+        let mut enigo = Enigo::new(&Settings::default())
+            .map_err(|e| PlatformError::Paste(format!("Failed to init enigo: {:?}", e)))?;
+
+        // Small delay to ensure target window has focus
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        // Type text directly - instant, no clipboard modification
+        enigo
+            .text(text)
+            .map_err(|e| PlatformError::Paste(format!("Failed to type text: {:?}", e)))?;
 
         Ok(())
     }
@@ -94,7 +93,7 @@ impl TextOutput for WindowsPlatform {
     }
 
     fn paste_text(&self, text: &str) -> Result<(), PlatformError> {
-        self.paste_via_clipboard(text)
+        self.paste_via_enigo(text)
     }
 }
 

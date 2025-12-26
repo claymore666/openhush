@@ -131,20 +131,20 @@ impl MacOSPlatform {
         }
     }
 
-    /// Paste text using clipboard + Cmd+V simulation
-    fn paste_via_clipboard(&self, text: &str) -> Result<(), PlatformError> {
-        // Copy to clipboard first
-        self.copy_to_clipboard(text)?;
+    /// Paste text using enigo direct typing (instant)
+    fn paste_via_enigo(&self, text: &str) -> Result<(), PlatformError> {
+        use enigo::{Enigo, Keyboard, Settings};
 
-        // Simulate Cmd+V using osascript (AppleScript)
-        // This is more reliable than enigo for cross-application pasting
-        std::process::Command::new("osascript")
-            .args([
-                "-e",
-                "tell application \"System Events\" to keystroke \"v\" using command down",
-            ])
-            .status()
-            .map_err(|e| PlatformError::Paste(format!("osascript failed: {}", e)))?;
+        let mut enigo = Enigo::new(&Settings::default())
+            .map_err(|e| PlatformError::Paste(format!("Failed to init enigo: {:?}", e)))?;
+
+        // Small delay to ensure target window has focus
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        // Type text directly - instant, no clipboard modification
+        enigo
+            .text(text)
+            .map_err(|e| PlatformError::Paste(format!("Failed to type text: {:?}", e)))?;
 
         Ok(())
     }
@@ -200,7 +200,7 @@ impl TextOutput for MacOSPlatform {
     }
 
     fn paste_text(&self, text: &str) -> Result<(), PlatformError> {
-        self.paste_via_clipboard(text)
+        self.paste_via_enigo(text)
     }
 }
 
