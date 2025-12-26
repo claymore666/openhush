@@ -19,6 +19,8 @@ mod output;
 mod panic_handler;
 mod platform;
 mod queue;
+#[cfg(target_os = "linux")]
+mod recording;
 mod secrets;
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 mod service;
@@ -110,6 +112,30 @@ enum Commands {
         /// Override model (tiny, base, small, medium, large-v3)
         #[arg(short, long)]
         model: Option<String>,
+    },
+
+    /// Record and transcribe audio (system audio or microphone)
+    #[cfg(target_os = "linux")]
+    Record {
+        /// Audio source: mic, monitor (system audio), or both
+        #[arg(short, long, default_value = "mic")]
+        source: String,
+
+        /// Output file (e.g., meeting.txt, call.srt)
+        #[arg(short, long)]
+        output: Option<String>,
+
+        /// Enable speaker diarization
+        #[arg(short, long)]
+        diarize: bool,
+
+        /// Live mode: print transcription as it happens
+        #[arg(short, long)]
+        live: bool,
+
+        /// Output format: text, timestamped, srt, vtt
+        #[arg(short = 'F', long, default_value = "text")]
+        format: String,
     },
 
     /// Control recording on a running daemon (Linux only, requires D-Bus)
@@ -541,6 +567,31 @@ async fn main() -> anyhow::Result<()> {
                     );
                 }
             }
+        }
+
+        #[cfg(target_os = "linux")]
+        Commands::Record {
+            source,
+            output,
+            diarize,
+            live,
+            format,
+        } => {
+            use crate::recording::{RecordingConfig, RecordingSession};
+
+            let audio_source = source.parse().map_err(|e: String| anyhow::anyhow!(e))?;
+
+            let config = RecordingConfig {
+                source: audio_source,
+                output_file: output,
+                enable_diarization: diarize,
+                live_mode: live,
+                output_format: format.parse().unwrap_or_default(),
+            };
+
+            info!("Starting recording session...");
+            let session = RecordingSession::new(config)?;
+            session.run().await?;
         }
 
         #[cfg(target_os = "linux")]
