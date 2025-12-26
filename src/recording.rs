@@ -9,6 +9,7 @@
 #![allow(dead_code)] // Diarization and mixed recording features used in Phase 3
 
 use crate::config::Config;
+use crate::diarization::{DiarizationConfig, DiarizationEngine, DiarizationError};
 use crate::engine::whisper::{WhisperEngine, WhisperError, WhisperModel};
 use crate::input::system_audio::{AudioSource, SystemAudioCapture, SystemAudioError};
 use crate::input::{AudioBuffer, AudioRecorder, AudioRecorderError};
@@ -52,6 +53,9 @@ pub enum RecordingError {
 
     #[error("VAD error: {0}")]
     Vad(String),
+
+    #[error("Diarization error: {0}")]
+    Diarization(#[from] DiarizationError),
 
     #[error("Model not found: {0}")]
     ModelNotFound(String),
@@ -291,6 +295,18 @@ impl RecordingSession {
         let vad_config = VadConfig::default();
         let _vad = SileroVad::new(&vad_config).map_err(|e| RecordingError::Vad(e.to_string()))?;
 
+        // Initialize diarization engine if enabled
+        let mut diarization_engine = if self.config.enable_diarization {
+            let diar_config = DiarizationConfig {
+                max_speakers: self.app_config.diarization.max_speakers,
+                similarity_threshold: self.app_config.diarization.similarity_threshold,
+            };
+            info!("Initializing speaker diarization...");
+            Some(DiarizationEngine::new(diar_config).await?)
+        } else {
+            None
+        };
+
         // Print header for VTT format
         if self.config.output_format == OutputFormat::Vtt && self.config.live_mode {
             println!("WEBVTT\n");
@@ -301,8 +317,20 @@ impl RecordingSession {
         let mut accumulated_samples: Vec<f32> = Vec::new();
         let mut segment_index = 1;
 
-        info!("Recording started. Press Ctrl+C to stop.");
-        println!("Recording... (Ctrl+C to stop)\n");
+        let mode_str = if self.config.enable_diarization {
+            "with diarization"
+        } else {
+            ""
+        };
+        info!("Recording started {}. Press Ctrl+C to stop.", mode_str);
+        println!(
+            "Recording{}... (Ctrl+C to stop)\n",
+            if self.config.enable_diarization {
+                " with diarization"
+            } else {
+                ""
+            }
+        );
 
         while self.running.load(Ordering::SeqCst) {
             // Collect samples
@@ -327,6 +355,22 @@ impl RecordingSession {
                     sample_rate,
                 };
 
+                // Get speaker ID from diarization if enabled
+                let speaker_id = if let Some(ref mut diar_engine) = diarization_engine {
+                    match diar_engine.diarize(&accumulated_samples, sample_rate) {
+                        Ok(diar_segments) => {
+                            // Use the first speaker in this chunk
+                            diar_segments.first().map(|seg| seg.speaker_id)
+                        }
+                        Err(e) => {
+                            warn!("Diarization error: {}", e);
+                            None
+                        }
+                    }
+                } else {
+                    None
+                };
+
                 // Transcribe
                 match engine.transcribe(&audio) {
                     Ok(result) => {
@@ -335,7 +379,7 @@ impl RecordingSession {
                                 start_secs: chunk_start_secs,
                                 end_secs: start_time.elapsed().as_secs_f32(),
                                 text: result.text.trim().to_string(),
-                                speaker_id: None, // Diarization will be added in Phase 3
+                                speaker_id,
                             };
 
                             // Output based on format
@@ -383,6 +427,16 @@ impl RecordingSession {
             let chunk_start_secs =
                 start_time.elapsed().as_secs_f32() - (accumulated_samples.len() as f32 / 16000.0);
 
+            // Get final speaker ID from diarization if enabled
+            let final_speaker_id = if let Some(ref mut diar_engine) = diarization_engine {
+                match diar_engine.diarize(&accumulated_samples, 16000) {
+                    Ok(diar_segments) => diar_segments.first().map(|s| s.speaker_id),
+                    Err(_) => None,
+                }
+            } else {
+                None
+            };
+
             let audio = AudioBuffer {
                 samples: accumulated_samples,
                 sample_rate: 16000,
@@ -394,7 +448,7 @@ impl RecordingSession {
                         start_secs: chunk_start_secs,
                         end_secs: start_time.elapsed().as_secs_f32(),
                         text: result.text.trim().to_string(),
-                        speaker_id: None,
+                        speaker_id: final_speaker_id,
                     };
 
                     let output = match self.config.output_format {
@@ -420,6 +474,9 @@ impl RecordingSession {
             format_timestamp(total_duration.as_secs_f32())
         );
         println!("Segments: {}", self.segments.len());
+        if let Some(ref diar_engine) = diarization_engine {
+            println!("Speakers detected: {}", diar_engine.speaker_count());
+        }
 
         // Save to file if output path specified
         if let Some(ref output_path) = self.config.output_file {
