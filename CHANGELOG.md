@@ -6,6 +6,33 @@ All notable changes to OpenHush are documented here.
 
 ---
 
+## [0.6.0] - 2025-12-26
+
+### Cross-Platform Parity
+
+This release completes full cross-platform support with system integration features.
+
+**What's New:**
+
+- **System Tray for Windows/macOS** — Native tray icons with status indicator and menu
+- **Autostart Service** — `openhush service install` enables autostart on login
+  - Linux: systemd user service
+  - macOS: LaunchAgent
+  - Windows: Registry Run key
+- **IPC Control** — Daemon control via platform-native IPC
+  - Linux: D-Bus (existing)
+  - macOS: Unix domain sockets
+  - Windows: Named pipes
+- **Preferences GUI for All Platforms** — egui-based settings window on Linux, macOS, and Windows
+
+**Under the Hood:**
+
+- Modular service management (`src/service/`)
+- Cross-platform IPC abstraction (`src/ipc/`)
+- Direct FFI bindings for Windows named pipes (no external dependencies)
+
+---
+
 ## [0.5.0] - 2025-12-26
 
 ### Packaging & Distribution
