@@ -74,6 +74,10 @@ pub struct Config {
     /// Speaker diarization settings
     #[serde(default)]
     pub diarization: DiarizationConfig,
+
+    /// Wake word detection settings ("Hey OpenHush")
+    #[serde(default)]
+    pub wake_word: WakeWordConfig,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -254,6 +258,65 @@ fn default_max_speakers() -> usize {
 
 fn default_similarity_threshold() -> f32 {
     0.5
+}
+
+/// Wake word detection configuration ("Hey OpenHush").
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct WakeWordConfig {
+    /// Enable wake word detection (requires always-on listening)
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Path to wake word model file (.rpw)
+    /// If not set, uses default "hey open hush" model
+    #[serde(default)]
+    pub model_path: Option<String>,
+
+    /// Detection sensitivity (0.0 = strict, 1.0 = loose)
+    #[serde(default = "default_wake_word_sensitivity")]
+    pub sensitivity: f32,
+
+    /// Minimum score threshold for detection (0.0 - 1.0)
+    #[serde(default = "default_wake_word_threshold")]
+    pub threshold: f32,
+
+    /// Seconds to record after wake word detected (0 = until silence)
+    #[serde(default = "default_wake_word_timeout")]
+    pub timeout_secs: f32,
+
+    /// Enable audio feedback beep on wake word detection
+    #[serde(default = "default_true")]
+    pub beep_on_detect: bool,
+
+    /// Enable visual notification on wake word detection
+    #[serde(default = "default_true")]
+    pub notify_on_detect: bool,
+}
+
+impl Default for WakeWordConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false, // Opt-in (always-on microphone has privacy implications)
+            model_path: None,
+            sensitivity: default_wake_word_sensitivity(),
+            threshold: default_wake_word_threshold(),
+            timeout_secs: default_wake_word_timeout(),
+            beep_on_detect: true,
+            notify_on_detect: true,
+        }
+    }
+}
+
+fn default_wake_word_sensitivity() -> f32 {
+    0.5 // Balanced sensitivity
+}
+
+fn default_wake_word_threshold() -> f32 {
+    0.5 // Minimum detection confidence
+}
+
+fn default_wake_word_timeout() -> f32 {
+    10.0 // 10 seconds max command length
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

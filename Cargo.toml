@@ -34,6 +34,10 @@ cpal = "0.17"
 # High-quality audio resampling
 rubato = "0.16"
 
+# Wake word detection (keyword spotting)
+# TODO: Blocked by candle-core f16 bug: https://github.com/huggingface/candle/issues/2805
+# rustpotter = { version = "3.0", default-features = false }
+
 # WAV file reading for one-shot transcription
 hound = "3.5"
 
