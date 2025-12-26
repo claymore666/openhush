@@ -54,7 +54,9 @@ impl DbusService {
 
         // Emit property change signal
         let iface = iface_ref.get().await;
-        iface.is_recording_changed(iface_ref.signal_emitter()).await?;
+        iface
+            .is_recording_changed(iface_ref.signal_emitter())
+            .await?;
         Ok(())
     }
 
@@ -82,12 +84,13 @@ impl DbusClient {
 
     /// Check if the daemon is running (owns the bus name).
     pub async fn is_daemon_running(&self) -> bool {
-        let proxy = zbus::fdo::DBusProxy::new(&self.connection)
-            .await
-            .ok();
+        let proxy = zbus::fdo::DBusProxy::new(&self.connection).await.ok();
 
         if let Some(proxy) = proxy {
-            proxy.name_has_owner(BUS_NAME.try_into().unwrap()).await.unwrap_or(false)
+            proxy
+                .name_has_owner(BUS_NAME.try_into().unwrap())
+                .await
+                .unwrap_or(false)
         } else {
             false
         }

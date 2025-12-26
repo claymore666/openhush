@@ -9,6 +9,8 @@
 
 use crate::config::{Config, CorrectionConfig, VocabularyConfig};
 use crate::correction::TextCorrector;
+#[cfg(target_os = "linux")]
+use crate::dbus::{DaemonCommand, DaemonStatus, DbusService};
 use crate::engine::{WhisperEngine, WhisperError};
 #[cfg(target_os = "linux")]
 use crate::gui;
@@ -20,10 +22,6 @@ use crate::queue::{
 };
 #[cfg(target_os = "linux")]
 use crate::tray::{TrayEvent, TrayManager};
-#[cfg(target_os = "linux")]
-use crate::dbus::{DbusService, DaemonCommand, DaemonStatus};
-#[cfg(target_os = "linux")]
-use tokio::sync::RwLock;
 use crate::vad::VadConfig;
 use crate::vad::{silero::SileroVad, VadEngine, VadError, VadState};
 use crate::vocabulary::{VocabularyError, VocabularyManager};
@@ -31,6 +29,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::mpsc;
+#[cfg(target_os = "linux")]
+use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
 /// Channel buffer size for job and result queues
@@ -388,7 +388,10 @@ impl Daemon {
         let (dbus_service, mut dbus_rx) = match DbusService::start(dbus_status.clone()).await {
             Ok((service, rx)) => (Some(service), Some(rx)),
             Err(e) => {
-                warn!("D-Bus service unavailable: {}. Continuing without D-Bus control.", e);
+                warn!(
+                    "D-Bus service unavailable: {}. Continuing without D-Bus control.",
+                    e
+                );
                 (None, None)
             }
         };
@@ -623,7 +626,9 @@ impl Daemon {
                                 // Start chunk timer if streaming enabled
                                 if let Some(interval) = chunk_interval {
                                     let mut timer = tokio::time::interval(interval);
-                                    timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                                    timer.set_missed_tick_behavior(
+                                        tokio::time::MissedTickBehavior::Skip,
+                                    );
                                     chunk_timer = Some(timer);
                                 }
 
@@ -668,7 +673,9 @@ impl Daemon {
 
                                 if let Some(interval) = chunk_interval {
                                     let mut timer = tokio::time::interval(interval);
-                                    timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                                    timer.set_missed_tick_behavior(
+                                        tokio::time::MissedTickBehavior::Skip,
+                                    );
                                     chunk_timer = Some(timer);
                                 }
 

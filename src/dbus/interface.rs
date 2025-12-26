@@ -35,10 +35,7 @@ pub struct DaemonInterface {
 
 impl DaemonInterface {
     /// Create a new D-Bus interface.
-    pub fn new(
-        command_tx: mpsc::Sender<DaemonCommand>,
-        status: Arc<RwLock<DaemonStatus>>,
-    ) -> Self {
+    pub fn new(command_tx: mpsc::Sender<DaemonCommand>, status: Arc<RwLock<DaemonStatus>>) -> Self {
         Self { command_tx, status }
     }
 }
