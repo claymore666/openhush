@@ -1,0 +1,23 @@
+#!/usr/bin/make -f
+
+export CARGO_HOME = $(CURDIR)/debian/cargo
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	cargo build --release --locked
+
+override_dh_auto_install:
+	install -D -m 755 target/release/openhush debian/openhush/usr/bin/openhush
+	install -D -m 644 packaging/flatpak/org.openhush.OpenHush.desktop debian/openhush/usr/share/applications/openhush.desktop
+	install -D -m 644 LICENSE debian/openhush/usr/share/doc/openhush/copyright
+
+override_dh_auto_test:
+	# Skip tests during package build
+	true
+
+override_dh_auto_clean:
+	cargo clean || true
+	rm -rf $(CARGO_HOME)
