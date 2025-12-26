@@ -4,7 +4,7 @@
 //! On macOS, the tray icon appears in the menu bar at the top of the screen.
 
 use super::{icon, TrayError, TrayEvent, TrayStatus};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver};
 use tracing::{debug, info, warn};
 use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
@@ -16,9 +16,9 @@ const MENU_QUIT: &str = "quit";
 
 /// Manages the menu bar icon and menu on macOS
 pub struct TrayManager {
+    #[allow(dead_code)]
     tray_icon: TrayIcon,
     event_rx: Receiver<TrayEvent>,
-    _menu_rx: Receiver<MenuEvent>,
     status_item: MenuItem,
     status: TrayStatus,
 }
@@ -90,7 +90,6 @@ impl TrayManager {
         Ok(Self {
             tray_icon,
             event_rx,
-            _menu_rx: MenuEvent::receiver().clone(),
             status_item,
             status: TrayStatus::Idle,
         })
