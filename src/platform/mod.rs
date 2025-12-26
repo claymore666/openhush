@@ -21,6 +21,9 @@ mod windows;
 pub mod sandbox;
 
 #[cfg(target_os = "linux")]
+pub mod wayland_ipc;
+
+#[cfg(target_os = "linux")]
 pub use linux::LinuxPlatform as CurrentPlatform;
 #[cfg(target_os = "macos")]
 pub use macos::MacOSPlatform as CurrentPlatform;
