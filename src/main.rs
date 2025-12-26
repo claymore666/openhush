@@ -9,7 +9,6 @@ mod daemon;
 #[cfg(target_os = "linux")]
 mod dbus;
 mod engine;
-#[cfg(target_os = "linux")]
 mod gui;
 mod input;
 mod output;
@@ -244,15 +243,7 @@ async fn main() -> anyhow::Result<()> {
 
         Commands::Preferences => {
             info!("Opening preferences...");
-            #[cfg(target_os = "linux")]
-            {
-                gui::run_preferences()?;
-            }
-            #[cfg(not(target_os = "linux"))]
-            {
-                eprintln!("Preferences GUI is only available on Linux in this release.");
-                eprintln!("Use 'openhush config --show' to view current settings.");
-            }
+            gui::run_preferences()?;
         }
 
         Commands::Stop => {
