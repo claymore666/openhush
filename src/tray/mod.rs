@@ -91,3 +91,100 @@ pub fn is_tray_supported() -> bool {
         true
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ===================
+    // TrayStatus Tests
+    // ===================
+
+    #[test]
+    fn test_tray_status_as_str() {
+        assert_eq!(TrayStatus::Idle.as_str(), "Status: Idle");
+        assert_eq!(TrayStatus::Recording.as_str(), "Status: Recording...");
+        assert_eq!(TrayStatus::Processing.as_str(), "Status: Processing...");
+        assert_eq!(TrayStatus::Error.as_str(), "Status: Error");
+    }
+
+    #[test]
+    fn test_tray_status_icon_name() {
+        assert_eq!(TrayStatus::Idle.icon_name(), "audio-input-microphone");
+        assert_eq!(TrayStatus::Recording.icon_name(), "media-record");
+        assert_eq!(TrayStatus::Processing.icon_name(), "view-refresh");
+        assert_eq!(TrayStatus::Error.icon_name(), "dialog-error");
+    }
+
+    #[test]
+    fn test_tray_status_equality() {
+        assert_eq!(TrayStatus::Idle, TrayStatus::Idle);
+        assert_ne!(TrayStatus::Idle, TrayStatus::Recording);
+    }
+
+    #[test]
+    fn test_tray_status_clone() {
+        let status = TrayStatus::Recording;
+        let cloned = status;
+        assert_eq!(status, cloned);
+    }
+
+    #[test]
+    fn test_tray_status_debug() {
+        assert_eq!(format!("{:?}", TrayStatus::Idle), "Idle");
+        assert_eq!(format!("{:?}", TrayStatus::Recording), "Recording");
+    }
+
+    // ===================
+    // TrayEvent Tests
+    // ===================
+
+    #[test]
+    fn test_tray_event_debug() {
+        assert_eq!(
+            format!("{:?}", TrayEvent::ShowPreferences),
+            "ShowPreferences"
+        );
+        assert_eq!(format!("{:?}", TrayEvent::Quit), "Quit");
+        assert_eq!(format!("{:?}", TrayEvent::StatusClicked), "StatusClicked");
+    }
+
+    #[test]
+    fn test_tray_event_clone() {
+        let event = TrayEvent::Quit;
+        let cloned = event.clone();
+        assert!(matches!(cloned, TrayEvent::Quit));
+    }
+
+    // ===================
+    // TrayError Tests
+    // ===================
+
+    #[test]
+    fn test_tray_error_display() {
+        let err = TrayError::IconCreation("test".into());
+        assert!(err.to_string().contains("Failed to create tray icon"));
+
+        let err = TrayError::MenuCreation("test".into());
+        assert!(err.to_string().contains("Failed to create menu"));
+
+        let err = TrayError::TrayBuild("test".into());
+        assert!(err.to_string().contains("Failed to build tray"));
+
+        let err = TrayError::NotSupported;
+        assert!(err.to_string().contains("not supported"));
+
+        let err = TrayError::DBus("test".into());
+        assert!(err.to_string().contains("D-Bus error"));
+    }
+
+    // ===================
+    // is_tray_supported Tests
+    // ===================
+
+    #[test]
+    fn test_is_tray_supported_returns_bool() {
+        // Just verify it returns a boolean without panicking
+        let _ = is_tray_supported();
+    }
+}

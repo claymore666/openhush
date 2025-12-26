@@ -107,4 +107,40 @@ mod tests {
         assert!(!ICON_PROCESSING.is_empty());
         assert!(!ICON_ERROR.is_empty());
     }
+
+    #[test]
+    fn test_icon_dimensions() {
+        assert_eq!(ICON_WIDTH, 32);
+        assert_eq!(ICON_HEIGHT, 32);
+    }
+
+    #[test]
+    fn test_icon_data_size() {
+        // RGBA = 4 bytes per pixel, 32x32 = 1024 pixels
+        let expected_size = (ICON_WIDTH * ICON_HEIGHT * 4) as usize;
+        assert_eq!(ICON_DATA.len(), expected_size);
+    }
+
+    #[test]
+    fn test_icon_data_has_visible_pixels() {
+        // Check that the icon has some non-transparent pixels
+        let has_visible = ICON_DATA.chunks(4).any(|pixel| pixel[3] > 0);
+        assert!(has_visible, "Icon should have visible pixels");
+    }
+
+    #[test]
+    fn test_icon_data_center_is_white() {
+        // Center pixel (16, 16) should be white (inner circle)
+        let center_idx = (16 * 32 + 16) * 4;
+        assert_eq!(ICON_DATA[center_idx], 255, "Center R should be 255");
+        assert_eq!(ICON_DATA[center_idx + 1], 255, "Center G should be 255");
+        assert_eq!(ICON_DATA[center_idx + 2], 255, "Center B should be 255");
+        assert_eq!(ICON_DATA[center_idx + 3], 255, "Center A should be 255");
+    }
+
+    #[test]
+    fn test_icon_data_corner_is_transparent() {
+        // Corner pixel (0, 0) should be transparent
+        assert_eq!(ICON_DATA[3], 0, "Corner should be transparent");
+    }
 }
