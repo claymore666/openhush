@@ -3,6 +3,7 @@
 - [Home](Home)
 - [Architecture](Architecture)
 - [Components](Components)
+- [Platform Support](Platform-Support)
 - [Product Vision](Product-Vision)
 - [Market Analysis](Market-Analysis)
 - [Plugin System](Plugin-System)
