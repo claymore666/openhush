@@ -106,6 +106,7 @@ impl TranscriptionWorker {
                 sequence_id,
                 chunk_id: job.chunk_id,
                 is_final: job.is_final,
+                duration_secs: audio_duration_secs,
             };
             if self.result_tx.blocking_send(result).is_err() {
                 debug!("Result channel closed, worker shutting down");

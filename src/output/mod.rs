@@ -1,8 +1,10 @@
-//! Output handling: clipboard and paste.
+//! Output handling: clipboard, paste, and post-transcription actions.
 
+pub mod actions;
 pub mod clipboard;
 pub mod paste;
 
+pub use actions::{ActionContext, ActionRunner};
 pub use clipboard::{copy_to_clipboard, ClipboardError};
 pub use paste::{paste_text, PasteError};
 

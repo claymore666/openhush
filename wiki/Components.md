@@ -365,8 +365,76 @@ Preferences GUI using egui framework.
 | Linux (X11) | Full support |
 | Linux (Wayland) | Full support |
 | Linux (TTY) | Not available |
-| macOS | CLI config only |
-| Windows | CLI config only |
+| macOS | Full support |
+| Windows | Full support |
+
+---
+
+## IPC (Inter-Process Communication)
+
+**Location:** `src/ipc/`
+
+Cross-platform daemon control.
+
+### Platform Implementations
+
+| Platform | Method | Location |
+|----------|--------|----------|
+| Linux | D-Bus | `src/dbus/service.rs` |
+| macOS | Unix sockets | `src/ipc/unix_socket.rs` |
+| Windows | Named pipes | `src/ipc/named_pipe.rs` |
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `status` | Query daemon status |
+| `stop` | Stop the daemon |
+
+### Usage
+
+```bash
+# Check if daemon is running
+openhush status
+
+# Stop the daemon
+openhush stop
+```
+
+---
+
+## Service Management
+
+**Location:** `src/service/`
+
+Cross-platform autostart management.
+
+### Platform Implementations
+
+| Platform | Method | Location |
+|----------|--------|----------|
+| Linux | systemd user service | `src/service/linux.rs` |
+| macOS | LaunchAgent | `src/service/macos.rs` |
+| Windows | Registry Run key | `src/service/windows.rs` |
+
+### Service Files
+
+- **Linux:** `~/.config/systemd/user/openhush.service`
+- **macOS:** `~/Library/LaunchAgents/org.openhush.daemon.plist`
+- **Windows:** `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`
+
+### CLI Usage
+
+```bash
+# Install autostart
+openhush service install
+
+# Remove autostart
+openhush service uninstall
+
+# Check status
+openhush service status
+```
 
 ---
 

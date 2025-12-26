@@ -36,6 +36,8 @@ pub struct TranscriptionResult {
     /// True if this is the final chunk
     #[allow(dead_code)]
     pub is_final: bool,
+    /// Duration of the audio in seconds
+    pub duration_secs: f32,
 }
 
 /// Composite key for tracking chunks: (sequence_id, chunk_id)
@@ -313,6 +315,7 @@ mod tests {
             sequence_id: seq,
             chunk_id: chunk,
             is_final,
+            duration_secs: 1.0, // Test default
         }
     }
 

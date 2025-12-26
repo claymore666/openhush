@@ -255,11 +255,31 @@ openhush recording toggle
 openhush recording status
 ```
 
-### Preferences GUI (Linux only)
+### Preferences GUI
 
 ```bash
 openhush preferences
 ```
+
+Opens a graphical settings window. Available on Linux, macOS, and Windows.
+
+### Autostart Service
+
+```bash
+# Enable autostart on login
+openhush service install
+
+# Disable autostart
+openhush service uninstall
+
+# Check service status
+openhush service status
+```
+
+Works on all platforms:
+- **Linux:** Creates systemd user service
+- **macOS:** Creates LaunchAgent
+- **Windows:** Adds to Registry Run key
 
 ---
 

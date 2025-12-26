@@ -1,3 +1,4 @@
+use crate::output::actions::ActionConfig;
 use crate::vad::VadConfig;
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
@@ -249,6 +250,10 @@ pub struct OutputConfig {
     /// Paste at cursor
     #[serde(default = "default_true")]
     pub paste: bool,
+
+    /// Post-transcription actions (shell commands, HTTP requests, file logging)
+    #[serde(default)]
+    pub actions: Vec<ActionConfig>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -622,6 +627,7 @@ impl Default for OutputConfig {
         Self {
             clipboard: true,
             paste: true,
+            actions: vec![],
         }
     }
 }

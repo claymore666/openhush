@@ -17,7 +17,7 @@ use crate::gui;
 use crate::input::{AudioMark, AudioRecorder, AudioRecorderError, HotkeyEvent, HotkeyListener};
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use crate::ipc::{IpcCommand, IpcResponse, IpcServer};
-use crate::output::{OutputError, OutputHandler};
+use crate::output::{ActionContext, ActionRunner, OutputError, OutputHandler};
 use crate::platform::{CurrentPlatform, Platform};
 use crate::queue::{
     worker::spawn_worker, TranscriptionJob, TranscriptionResult, TranscriptionTracker,
@@ -193,14 +193,16 @@ impl BackpressureConfig {
 
 /// Process and output a transcription result.
 ///
-/// Applies vocabulary replacements, LLM correction, and outputs the text.
-/// Returns the processed text for logging purposes.
+/// Applies vocabulary replacements, LLM correction, outputs the text,
+/// and runs post-transcription actions.
 async fn process_and_output(
     result: TranscriptionResult,
     chunk_separator: &str,
     vocabulary_manager: &Option<Arc<VocabularyManager>>,
     text_corrector: &Option<Arc<TextCorrector>>,
     output_handler: &OutputHandler,
+    action_runner: &ActionRunner,
+    model_name: &str,
 ) {
     if result.text.is_empty() {
         debug!(
@@ -238,6 +240,17 @@ async fn process_and_output(
 
     if let Err(e) = output_handler.output(&text) {
         error!("Output failed: {}", e);
+    }
+
+    // Run post-transcription actions
+    if action_runner.has_actions() {
+        let ctx = ActionContext::new(
+            text,
+            result.duration_secs,
+            model_name.to_string(),
+            result.sequence_id,
+        );
+        action_runner.run_all(&ctx).await;
     }
 }
 
@@ -427,7 +440,7 @@ impl Daemon {
 
         // Check if model exists
         let model_path = self.model_path()?;
-        let effective_model = self.config.transcription.effective_model();
+        let effective_model = self.config.transcription.effective_model().to_string();
         if !model_path.exists() {
             error!(
                 "Model not found at: {}. Run 'openhush model download {}'",
@@ -499,6 +512,15 @@ impl Daemon {
 
         // Initialize output handler
         let output_handler = OutputHandler::new(&self.config.output);
+
+        // Initialize post-transcription action runner
+        let action_runner = ActionRunner::new(self.config.output.actions.clone());
+        if action_runner.has_actions() {
+            info!(
+                "Post-transcription actions enabled ({} action(s))",
+                self.config.output.actions.len()
+            );
+        }
 
         // Initialize always-on audio recorder with ring buffer
         let prebuffer_secs = self.config.audio.prebuffer_duration_secs;
@@ -897,6 +919,8 @@ impl Daemon {
                                         &vocabulary_manager,
                                         &text_corrector,
                                         &output_handler,
+                                        &action_runner,
+                                        &effective_model,
                                     ).await;
                                 }
                             }
@@ -926,6 +950,8 @@ impl Daemon {
                                 &vocabulary_manager,
                                 &text_corrector,
                                 &output_handler,
+                                &action_runner,
+                                &effective_model,
                             ).await;
                         }
                     } else {
