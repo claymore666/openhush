@@ -15,7 +15,7 @@ mod output;
 mod panic_handler;
 mod platform;
 mod queue;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 mod tray;
 mod vad;
 mod vocabulary;

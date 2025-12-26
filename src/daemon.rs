@@ -20,7 +20,7 @@ use crate::platform::{CurrentPlatform, Platform};
 use crate::queue::{
     worker::spawn_worker, TranscriptionJob, TranscriptionResult, TranscriptionTracker,
 };
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 use crate::tray::{TrayEvent, TrayManager};
 use crate::vad::VadConfig;
 use crate::vad::{silero::SileroVad, VadEngine, VadError, VadState};
@@ -356,8 +356,8 @@ impl Daemon {
             self.config.transcription.preset
         );
 
-        // Initialize system tray if enabled (Linux only for now)
-        #[cfg(target_os = "linux")]
+        // Initialize system tray if enabled (Linux and Windows)
+        #[cfg(any(target_os = "linux", target_os = "windows"))]
         let tray: Option<TrayManager> = if enable_tray {
             match TrayManager::new().await {
                 Ok(t) => {
@@ -374,9 +374,9 @@ impl Daemon {
             None
         };
 
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(any(target_os = "linux", target_os = "windows")))]
         let _tray_enabled = enable_tray; // Suppress unused warning
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(any(target_os = "linux", target_os = "windows")))]
         if enable_tray {
             info!("System tray not yet supported on this platform");
         }
@@ -588,11 +588,10 @@ impl Daemon {
                 }
             }
 
-            // Check for tray events (Linux only)
-            #[cfg(target_os = "linux")]
+            // Check for tray events (Linux and Windows)
+            #[cfg(any(target_os = "linux", target_os = "windows"))]
             {
                 // Check for tray events (non-blocking)
-                // Note: ksni handles its own event loop via tokio, we just poll for events
                 if let Some(ref tray) = &tray {
                     if let Some(tray_event) = tray.try_recv() {
                         match tray_event {
