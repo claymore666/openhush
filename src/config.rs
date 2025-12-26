@@ -66,6 +66,10 @@ pub struct Config {
     /// Appearance settings (theme)
     #[serde(default)]
     pub appearance: AppearanceConfig,
+
+    /// App-specific profiles for context-aware settings
+    #[serde(default)]
+    pub profiles: Vec<AppProfile>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -85,6 +89,54 @@ impl Default for LoggingConfig {
 
 fn default_log_level() -> String {
     "info".to_string()
+}
+
+/// App-specific profile for context-aware settings.
+///
+/// Allows different settings per application (e.g., aggressive filler
+/// removal in email clients, conservative mode in code editors).
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AppProfile {
+    /// Profile name (for display/logging)
+    pub name: String,
+
+    /// Application names/classes to match (case-insensitive, partial match)
+    #[serde(default)]
+    pub apps: Vec<String>,
+
+    /// Whether OpenHush is enabled for these apps
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+
+    /// Override vocabulary file for this profile
+    #[serde(default)]
+    pub vocabulary_file: Option<String>,
+
+    /// Override snippets file for this profile
+    #[serde(default)]
+    pub snippets_file: Option<String>,
+
+    /// Override filler removal level: "off", "conservative", "moderate", "aggressive"
+    #[serde(default)]
+    pub filler_removal: Option<String>,
+
+    /// Override transcription preset: "instant", "balanced", "quality"
+    #[serde(default)]
+    pub preset: Option<String>,
+}
+
+impl AppProfile {
+    /// Check if this profile matches the given app context.
+    #[allow(dead_code)]
+    pub fn matches(&self, app_name: &str) -> bool {
+        let app_lower = app_name.to_lowercase();
+        self.apps.iter().any(|pattern| {
+            let pattern_lower = pattern.to_lowercase();
+            app_lower == pattern_lower
+                || app_lower.contains(&pattern_lower)
+                || pattern_lower.contains(&app_lower)
+        })
+    }
 }
 
 /// Theme setting for the UI
@@ -843,6 +895,26 @@ impl Config {
 
         info!("Config saved to: {}", path.display());
         Ok(())
+    }
+
+    /// Find the matching profile for an app name.
+    ///
+    /// Returns the first matching profile, or None if no profile matches.
+    #[allow(dead_code)]
+    pub fn find_profile(&self, app_name: &str) -> Option<&AppProfile> {
+        self.profiles.iter().find(|p| p.matches(app_name))
+    }
+
+    /// Check if OpenHush is enabled for the given app.
+    ///
+    /// Returns true if no profile matches (default enabled) or if the
+    /// matching profile has enabled=true.
+    #[allow(dead_code)]
+    pub fn is_enabled_for_app(&self, app_name: &str) -> bool {
+        match self.find_profile(app_name) {
+            Some(profile) => profile.enabled,
+            None => true, // Default enabled
+        }
     }
 }
 

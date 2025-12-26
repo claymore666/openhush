@@ -4,6 +4,7 @@ use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 mod config;
+mod context;
 mod correction;
 mod daemon;
 #[cfg(target_os = "linux")]
