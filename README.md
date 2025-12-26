@@ -121,6 +121,19 @@ openhush config --model large-v3    # Use most accurate model
 openhush config --language de       # Set language (or "auto")
 ```
 
+### Autostart Service
+
+```bash
+openhush service install            # Enable autostart on login
+openhush service uninstall          # Disable autostart
+openhush service status             # Check service status
+```
+
+Works on all platforms:
+- **Linux:** Creates systemd user service
+- **macOS:** Creates LaunchAgent
+- **Windows:** Adds to Registry Run key
+
 ### D-Bus Control (Linux)
 
 ```bash
@@ -185,8 +198,8 @@ Build with your GPU's feature flag (see [Building from Source](#building-from-so
 | Linux (X11) | ✅ Full | Ubuntu, Fedora, Debian, etc. |
 | Linux (Wayland) | ✅ Full | KDE Plasma, GNOME, Sway |
 | Linux (TTY) | ✅ Full | Terminal-only mode |
-| macOS | ✅ Basic | Intel & Apple Silicon |
-| Windows | ✅ Basic | Windows 10/11 |
+| macOS | ✅ Full | Intel & Apple Silicon |
+| Windows | ✅ Full | Windows 10/11 |
 
 ## Configuration File
 
