@@ -25,8 +25,8 @@ This document tracks feature availability across all supported platforms.
 | File transcription | ✅ | ✅ | ✅ | - |
 | Audio input (microphone) | ✅ | ✅ | ✅ | - |
 | Clipboard copy | ✅ | ✅ | ✅ | - |
-| Auto-paste text | ✅ | 🔶 | 🔶 | - |
-| Hotkey trigger | ✅ | 🔶 | 🔶 | - |
+| Auto-paste text | ✅ | ✅ | ✅ | - |
+| Hotkey trigger | ✅ | ✅ | ✅ | - |
 | Configuration file | ✅ | ✅ | ✅ | - |
 | CLI commands | ✅ | ✅ | ✅ | - |
 
