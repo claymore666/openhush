@@ -70,7 +70,7 @@ This document tracks feature availability across all supported platforms.
 | Feature | Linux | macOS | Windows | Issue |
 |---------|-------|-------|---------|-------|
 | Preferences dialog | ✅ | ✅ | ✅ | Closed |
-| Onboarding wizard | ❌ | ❌ | ❌ | [#76](https://github.com/claymore666/openhush/issues/76) |
+| Onboarding wizard | ✅ | ✅ | ✅ | Closed |
 
 ---
 
@@ -84,7 +84,7 @@ This document tracks feature availability across all supported platforms.
 | SELinux policy | ✅ | N/A | N/A | Closed |
 | Firejail profile | ✅ | N/A | N/A | Closed |
 | Sandbox detection | ✅ | N/A | N/A | Closed |
-| Keyring integration | ❌ | ❌ | ❌ | [#96](https://github.com/claymore666/openhush/issues/96) |
+| Keyring integration | ✅ | ✅ | ✅ | Closed |
 
 ---
 
@@ -112,9 +112,11 @@ This document tracks feature availability across all supported platforms.
 | Custom vocabulary | ✅ | ✅ | ✅ | - |
 | Filler word removal | ✅ | ✅ | ✅ | - |
 | Text replacement | ✅ | ✅ | ✅ | - |
+| Post-transcription actions | ✅ | ✅ | ✅ | Closed |
+| App-aware profiles | ✅ | ✅ | ✅ | Closed |
 | Plugin system | ❌ | ❌ | ❌ | [#93](https://github.com/claymore666/openhush/issues/93) |
-| Wake word detection | ❌ | ❌ | ❌ | [#63](https://github.com/claymore666/openhush/issues/63) |
-| System audio capture | ❌ | ❌ | ❌ | [#61](https://github.com/claymore666/openhush/issues/61) |
+| Wake word detection | ✅ | ✅ | ✅ | Closed |
+| System audio capture | ✅ | ❌ | ❌ | Closed |
 
 ---
 
@@ -128,7 +130,8 @@ This document tracks feature availability across all supported platforms.
 | Auto-paste (TTY) | N/A | N/A | ✅ | - |
 | System tray (D-Bus SNI) | ✅ | ✅ | N/A | - |
 | D-Bus service mode | ✅ | ✅ | ✅ | - |
-| Hyprland/Sway IPC | N/A | ❌ | N/A | [#78](https://github.com/claymore666/openhush/issues/78) |
+| Hyprland/Sway IPC | ✅ | N/A | N/A | Closed |
+| Waybar/Polybar scripts | ✅ | N/A | N/A | Closed |
 
 ---
 
@@ -163,10 +166,31 @@ This document tracks feature availability across all supported platforms.
    - Windows: Registry Run key
    - `openhush service install/uninstall/status` commands
 
+7. ~~**Keyring Integration**~~ ✅
+   - macOS Keychain, Windows Credential Manager, Linux Secret Service
+
+8. ~~**Wake Word Detection**~~ ✅
+   - openWakeWord ONNX models for hands-free activation
+
+9. ~~**Hyprland/Sway IPC**~~ ✅
+   - Native compositor integration for status updates
+
+10. ~~**App-Aware Profiles**~~ ✅
+    - Per-application configuration switching
+
+11. ~~**Post-Transcription Actions**~~ ✅
+    - Shell commands, HTTP requests, file logging
+
+12. ~~**Onboarding Wizard**~~ ✅
+    - First-run setup with microphone test, model download, hotkey config
+
 ### Low Priority (Future)
 
-7. **Keyring Integration** ([#96](https://github.com/claymore666/openhush/issues/96))
-   - macOS Keychain, Windows Credential Manager, Linux Secret Service
+13. **Plugin System** ([#93](https://github.com/claymore666/openhush/issues/93))
+   - Extensible architecture for community extensions
+
+14. ~~**System Audio Capture**~~ ✅
+   - PulseAudio/PipeWire monitor sources for meeting transcription (Linux only)
 
 ---
 

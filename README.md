@@ -19,13 +19,17 @@ Press a hotkey, speak, release — your words appear where your cursor is. Power
 - **Toggle mode** — Press once to start recording, press again to stop.
 - **Auto-paste** — Transcribed text is typed automatically, or copied to clipboard.
 - **Translation** — Speak in any language, get English text (great for multilingual users).
+- **System audio capture** — Transcribe meetings, calls, or any desktop audio (Linux with PulseAudio/PipeWire).
 
 ### Smart Processing
 - **Continuous dictation** — Keep talking naturally; OpenHush detects pauses and transcribes automatically.
+- **Wake word activation** — Say "Hey OpenHush" for hands-free recording (no hotkey needed).
 - **Noise reduction** — AI-powered background noise removal (keyboard, fans, traffic).
 - **Filler word cleanup** — Removes "um", "uh", "like", "you know" from your speech.
 - **Custom vocabulary** — Add names, jargon, or terms that Whisper gets wrong.
 - **Text snippets** — Expand abbreviations (e.g., "sig" → your email signature).
+- **Post-transcription actions** — Run shell commands, send HTTP requests, or log to files after transcription.
+- **App-aware profiles** — Different settings per application (e.g., aggressive filler removal in email, conservative in code editors).
 
 ### Quality Options
 - **Instant mode** — Fastest response, good for quick notes and chat.
@@ -40,6 +44,7 @@ Press a hotkey, speak, release — your words appear where your cursor is. Power
 
 ### Security
 - **Sandboxing** — AppArmor, SELinux, and Firejail profiles included.
+- **Secure secrets** — API keys stored in platform keyring (Keychain, Credential Manager, Secret Service).
 - **Minimal permissions** — Only accesses microphone, config, and models.
 - **No network** — Works fully offline (optional Ollama connection).
 
@@ -300,9 +305,6 @@ For detailed documentation, visit the **[OpenHush Wiki](https://github.com/claym
 ## Roadmap
 
 ### Coming Soon
-- Wake word activation ("Hey OpenHush")
-- System audio capture (transcribe meetings)
-- App-specific settings (different config per application)
 - Plugin system for community extensions
 
 ### Packaging Status

@@ -11,9 +11,14 @@ This guide covers installation, configuration, and daily usage of OpenHush.
 3. [Configuration](#configuration)
 4. [CLI Commands](#cli-commands)
 5. [Recording Modes](#recording-modes)
-6. [File Transcription](#file-transcription)
-7. [GPU Acceleration](#gpu-acceleration)
-8. [Troubleshooting](#troubleshooting)
+6. [Wake Word Detection](#wake-word-detection)
+7. [System Audio Capture](#system-audio-capture)
+8. [Post-Transcription Actions](#post-transcription-actions)
+9. [App-Aware Profiles](#app-aware-profiles)
+10. [Secret Management](#secret-management)
+11. [File Transcription](#file-transcription)
+12. [GPU Acceleration](#gpu-acceleration)
+13. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -351,6 +356,282 @@ openhush config mode toggle
 # Return to push-to-talk
 openhush config mode push_to_talk
 ```
+
+---
+
+## Wake Word Detection
+
+Enable hands-free activation with wake word detection. Say "Hey OpenHush" and start speaking — no hotkey needed.
+
+### Configuration
+
+```toml
+# ~/.config/openhush/config.toml
+
+[wake_word]
+enabled = true              # Enable wake word detection
+sensitivity = 0.5           # Detection sensitivity (0.0 = strict, 1.0 = loose)
+threshold = 0.5             # Minimum confidence for detection (0.0 - 1.0)
+timeout_secs = 10.0         # Max recording time after wake word (0 = until silence)
+beep_on_detect = true       # Audio beep when wake word detected
+notify_on_detect = true     # Desktop notification on detection
+```
+
+### Usage
+
+1. Enable wake word detection in config or via CLI
+2. OpenHush continuously listens in the background (low CPU usage)
+3. Say "Hey OpenHush" clearly
+4. You'll hear a beep and see a notification
+5. Start speaking your dictation
+6. Recording stops automatically after silence or timeout
+
+### Privacy Note
+
+Wake word detection keeps the microphone listening continuously. Audio is processed locally and never sent anywhere. If privacy is a concern, use the hotkey mode instead.
+
+---
+
+## System Audio Capture
+
+Transcribe meetings, calls, podcasts, or any desktop audio. Works on Linux with PulseAudio or PipeWire.
+
+### Audio Sources
+
+| Source | Description |
+|--------|-------------|
+| `mic` | Default microphone input (default) |
+| `monitor` | System/desktop audio only |
+| `both` | Mix of microphone and system audio |
+
+### Configuration
+
+```toml
+# ~/.config/openhush/config.toml
+
+[audio]
+source = "monitor"      # mic, monitor, or both
+```
+
+### CLI Usage
+
+```bash
+# Transcribe system audio
+openhush start --source monitor
+
+# Transcribe file with system audio capture
+openhush transcribe --source monitor
+
+# Mix microphone and system audio
+openhush start --source both
+```
+
+### Use Cases
+
+- **Meeting transcription** — Capture Zoom, Teams, or Google Meet audio
+- **Podcast notes** — Transcribe while listening
+- **Video captions** — Generate subtitles from video playback
+- **Language learning** — Transcribe foreign language content
+
+### Requirements
+
+- Linux with PulseAudio or PipeWire
+- PipeWire users: PulseAudio compatibility layer (usually installed by default)
+
+### Troubleshooting
+
+```bash
+# List available monitor sources
+pactl list sources short | grep monitor
+
+# Test recording from monitor
+parecord -d alsa_output.pci-0000_00_1f.3.analog-stereo.monitor test.wav
+```
+
+---
+
+## Post-Transcription Actions
+
+Run custom actions after each transcription: shell commands, HTTP requests, or file logging.
+
+### Configuration
+
+```toml
+# ~/.config/openhush/config.toml
+
+[output]
+clipboard = true
+paste = true
+
+# Notify on transcription
+[[output.actions]]
+type = "shell"
+command = "notify-send 'OpenHush' '{text}'"
+enabled = true
+
+# Log all transcriptions to file
+[[output.actions]]
+type = "file"
+path = "~/Documents/dictation/{date}.md"
+format = "- [{time}] {text}\n"
+append = true
+enabled = true
+
+# Send to webhook
+[[output.actions]]
+type = "http"
+url = "http://localhost:8080/api/notes"
+method = "POST"
+body = '{"content": "{text_escaped}", "source": "voice"}'
+headers = { "Content-Type" = "application/json" }
+enabled = false
+```
+
+### Action Types
+
+| Type | Description |
+|------|-------------|
+| `shell` | Run a shell command |
+| `file` | Append or write to a file |
+| `http` | Send an HTTP request |
+
+### Variables
+
+Use these placeholders in commands, URLs, and templates:
+
+| Variable | Description |
+|----------|-------------|
+| `{text}` | Raw transcribed text |
+| `{text_escaped}` | JSON-escaped text (for API payloads) |
+| `{text_base64}` | Base64-encoded text |
+| `{date}` | Current date (YYYY-MM-DD) |
+| `{time}` | Current time (HH:MM:SS) |
+| `{duration}` | Recording duration in seconds |
+| `{model}` | Whisper model used |
+| `{seq_id}` | Transcription sequence ID |
+
+### Examples
+
+**Voice notes to Obsidian:**
+```toml
+[[output.actions]]
+type = "file"
+path = "~/Obsidian/Voice Notes/{date}.md"
+format = "## {time}\n{text}\n\n"
+append = true
+```
+
+**Slack notification:**
+```toml
+[[output.actions]]
+type = "http"
+url = "https://hooks.slack.com/services/XXX/YYY/ZZZ"
+method = "POST"
+body = '{"text": "{text_escaped}"}'
+```
+
+---
+
+## App-Aware Profiles
+
+Configure different settings per application. For example, use aggressive filler word removal in email clients but conservative mode in code editors.
+
+### Configuration
+
+```toml
+# ~/.config/openhush/config.toml
+
+# Default settings apply when no profile matches
+[correction]
+filler_removal = "moderate"
+
+# Profile for email apps
+[[profiles]]
+name = "email"
+apps = ["Thunderbird", "Evolution", "Geary", "Gmail"]
+filler_removal = "aggressive"
+vocabulary_file = "~/.config/openhush/vocab-email.toml"
+
+# Profile for code editors
+[[profiles]]
+name = "code"
+apps = ["Code", "code-oss", "vim", "nvim", "Sublime"]
+filler_removal = "conservative"
+vocabulary_file = "~/.config/openhush/vocab-code.toml"
+
+# Disable in browsers
+[[profiles]]
+name = "disabled"
+apps = ["Firefox", "Chromium", "Chrome"]
+enabled = false
+```
+
+### How It Works
+
+1. OpenHush detects the currently focused application
+2. Matches against profile `apps` list (case-insensitive, partial match)
+3. Applies profile overrides (vocabulary, filler removal, etc.)
+4. Falls back to default settings if no profile matches
+
+### Platform Support
+
+| Platform | Detection Method |
+|----------|------------------|
+| Linux X11 | `xdotool getactivewindow` |
+| Linux Wayland | Hyprland/Sway IPC |
+| macOS | `NSWorkspace.frontmostApplication` |
+| Windows | `GetForegroundWindow()` |
+
+---
+
+## Secret Management
+
+Store API keys securely in your platform's keyring instead of plaintext config files.
+
+### CLI Commands
+
+```bash
+# Store a secret
+openhush secret set ollama-api
+Enter secret: ********
+Secret 'ollama-api' stored securely.
+
+# List stored secrets (names only)
+openhush secret list
+Stored secrets:
+  - ollama-api
+  - slack-webhook
+
+# Delete a secret
+openhush secret delete ollama-api
+Secret 'ollama-api' deleted.
+
+# Show a secret (use with caution)
+openhush secret show ollama-api
+```
+
+### Using Secrets in Config
+
+Reference secrets with the `keyring:` prefix:
+
+```toml
+# ~/.config/openhush/config.toml
+
+[correction]
+# Reference secret from keyring (recommended)
+ollama_api_key = "keyring:ollama-api"
+
+# Inline secret (NOT recommended, will show warning)
+# ollama_api_key = "sk-plaintext-key-here"
+```
+
+### Platform Keyrings
+
+| Platform | Backend |
+|----------|---------|
+| Linux | Secret Service (GNOME Keyring, KWallet) |
+| macOS | Keychain |
+| Windows | Credential Manager |
 
 ---
 

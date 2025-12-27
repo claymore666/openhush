@@ -8,11 +8,19 @@ All notable changes to OpenHush are documented here.
 
 ## [0.6.0] - 2025-12-26
 
-### Cross-Platform Parity
+### Advanced Features & Extensibility
 
-This release completes full cross-platform support with system integration features.
+This release adds powerful new features for hands-free operation, automation, and per-app customization.
 
-**What's New:**
+**Highlights:**
+
+- **Wake Word Detection** — Say "Hey OpenHush" for hands-free activation using openWakeWord ONNX models
+- **System Audio Capture** — Transcribe meetings, calls, and desktop audio via PulseAudio/PipeWire monitor sources (Linux)
+- **Post-Transcription Actions** — Run shell commands, send HTTP requests, or log to files after each transcription
+- **App-Aware Profiles** — Different settings per application (e.g., aggressive filler removal in email, conservative in code editors)
+- **Secure Secret Management** — Store API keys in platform keyrings (Keychain, Credential Manager, Secret Service)
+
+**Cross-Platform Parity:**
 
 - **System Tray for Windows/macOS** — Native tray icons with status indicator and menu
 - **Autostart Service** — `openhush service install` enables autostart on login
@@ -24,11 +32,26 @@ This release completes full cross-platform support with system integration featu
   - macOS: Unix domain sockets
   - Windows: Named pipes
 - **Preferences GUI for All Platforms** — egui-based settings window on Linux, macOS, and Windows
+- **macOS Accessibility Permission** — Automatic permission prompts with guidance
+
+**Linux Desktop Integration:**
+
+- **Hyprland/Sway IPC** — Native Wayland compositor integration for status updates
+- **Waybar/Polybar Scripts** — Ready-to-use status bar scripts with recording indicator
+- **First-Run Onboarding Wizard** — Guided setup with microphone test and model download
+
+**Security:**
+
+- **Platform Keyring Integration** — Secrets stored encrypted in OS credential managers
+- **Sandbox Detection** — Runtime detection of AppArmor, SELinux, Firejail, Flatpak
 
 **Under the Hood:**
 
 - Modular service management (`src/service/`)
 - Cross-platform IPC abstraction (`src/ipc/`)
+- Application context detection (`src/context.rs`)
+- Action runner with variable substitution (`src/output/actions.rs`)
+- RAII-compliant FFI memory management for WhisperEngine
 - Direct FFI bindings for Windows named pipes (no external dependencies)
 
 ---
