@@ -481,6 +481,10 @@ fn run_capture_loop(
 mod tests {
     use super::*;
 
+    // ===================
+    // AudioSource Tests
+    // ===================
+
     #[test]
     fn test_audio_source_from_str() {
         assert_eq!(
@@ -496,11 +500,228 @@ mod tests {
     }
 
     #[test]
+    fn test_audio_source_from_str_aliases() {
+        // Test all aliases for mic
+        assert_eq!(
+            "microphone".parse::<AudioSource>().unwrap(),
+            AudioSource::Microphone
+        );
+
+        // Test all aliases for monitor
+        assert_eq!(
+            "system".parse::<AudioSource>().unwrap(),
+            AudioSource::Monitor
+        );
+        assert_eq!(
+            "desktop".parse::<AudioSource>().unwrap(),
+            AudioSource::Monitor
+        );
+
+        // Test all aliases for both
+        assert_eq!("mix".parse::<AudioSource>().unwrap(), AudioSource::Both);
+        assert_eq!("all".parse::<AudioSource>().unwrap(), AudioSource::Both);
+    }
+
+    #[test]
+    fn test_audio_source_from_str_case_insensitive() {
+        assert_eq!(
+            "MIC".parse::<AudioSource>().unwrap(),
+            AudioSource::Microphone
+        );
+        assert_eq!(
+            "MONITOR".parse::<AudioSource>().unwrap(),
+            AudioSource::Monitor
+        );
+        assert_eq!("Both".parse::<AudioSource>().unwrap(), AudioSource::Both);
+    }
+
+    #[test]
+    fn test_audio_source_from_str_error_message() {
+        let result = "invalid".parse::<AudioSource>();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("invalid"));
+        assert!(err.contains("mic"));
+        assert!(err.contains("monitor"));
+        assert!(err.contains("both"));
+    }
+
+    #[test]
     fn test_audio_source_default() {
         assert_eq!(AudioSource::default(), AudioSource::Microphone);
     }
 
-    // Note: Integration tests for actual capture require PulseAudio/PipeWire
-    // and are skipped in CI. Run manually with:
-    // cargo test --features integration -- --ignored
+    #[test]
+    fn test_audio_source_eq() {
+        assert_eq!(AudioSource::Microphone, AudioSource::Microphone);
+        assert_eq!(AudioSource::Monitor, AudioSource::Monitor);
+        assert_eq!(AudioSource::Both, AudioSource::Both);
+        assert_ne!(AudioSource::Microphone, AudioSource::Monitor);
+    }
+
+    #[test]
+    fn test_audio_source_clone() {
+        let source = AudioSource::Monitor;
+        let cloned = source;
+        assert_eq!(source, cloned);
+    }
+
+    // ===================
+    // SystemAudioError Tests
+    // ===================
+
+    #[test]
+    fn test_system_audio_error_display() {
+        let err = SystemAudioError::ConnectionFailed("timeout".to_string());
+        assert_eq!(format!("{}", err), "PulseAudio connection failed: timeout");
+
+        let err = SystemAudioError::NoMonitorSource;
+        assert_eq!(format!("{}", err), "No monitor source found");
+
+        let err = SystemAudioError::StreamFailed("buffer error".to_string());
+        assert_eq!(format!("{}", err), "Stream creation failed: buffer error");
+
+        let err = SystemAudioError::OperationFailed("read error".to_string());
+        assert_eq!(format!("{}", err), "Operation failed: read error");
+    }
+
+    // ===================
+    // SourceInfo Tests
+    // ===================
+
+    #[test]
+    fn test_source_info_creation() {
+        let info = SourceInfo {
+            name: "test_source".to_string(),
+            description: "Test Source".to_string(),
+            is_monitor: true,
+            sample_rate: 48000,
+            channels: 2,
+        };
+        assert_eq!(info.name, "test_source");
+        assert_eq!(info.description, "Test Source");
+        assert!(info.is_monitor);
+        assert_eq!(info.sample_rate, 48000);
+        assert_eq!(info.channels, 2);
+    }
+
+    #[test]
+    fn test_source_info_clone() {
+        let info = SourceInfo {
+            name: "monitor".to_string(),
+            description: "Monitor of Built-in Audio".to_string(),
+            is_monitor: true,
+            sample_rate: 44100,
+            channels: 2,
+        };
+        let cloned = info.clone();
+        assert_eq!(info.name, cloned.name);
+        assert_eq!(info.description, cloned.description);
+        assert_eq!(info.is_monitor, cloned.is_monitor);
+        assert_eq!(info.sample_rate, cloned.sample_rate);
+        assert_eq!(info.channels, cloned.channels);
+    }
+
+    // ===================
+    // Constants Tests
+    // ===================
+
+    #[test]
+    fn test_sample_rate_constant() {
+        assert_eq!(SAMPLE_RATE, 16000);
+    }
+
+    // ===================
+    // Integration Tests (require PulseAudio/PipeWire)
+    // ===================
+
+    #[test]
+    #[ignore] // Run with: cargo test test_list_monitor_sources -- --ignored
+    fn test_list_monitor_sources() {
+        let result = list_monitor_sources();
+        // Should succeed if PulseAudio is available
+        if let Ok(sources) = result {
+            // All returned sources should be monitors
+            for source in &sources {
+                assert!(source.is_monitor, "Source {} is not a monitor", source.name);
+            }
+        }
+    }
+
+    #[test]
+    #[ignore] // Run with: cargo test test_list_all_sources -- --ignored
+    fn test_list_all_sources() {
+        let result = list_all_sources();
+        // Should succeed if PulseAudio is available
+        if let Ok(sources) = result {
+            assert!(!sources.is_empty(), "Should have at least one source");
+            // Check that we have valid sample rates
+            for source in &sources {
+                assert!(source.sample_rate > 0, "Invalid sample rate");
+                assert!(source.channels > 0, "Invalid channel count");
+            }
+        }
+    }
+
+    #[test]
+    #[ignore] // Run with: cargo test test_system_audio_capture_new -- --ignored
+    fn test_system_audio_capture_new() {
+        let result = SystemAudioCapture::new(None);
+        match result {
+            Ok(capture) => {
+                // Should have a valid source name
+                assert!(!capture.source_name().is_empty());
+                // Initial buffer should be empty
+                assert_eq!(capture.buffer_len(), 0);
+            }
+            Err(SystemAudioError::NoMonitorSource) => {
+                // OK - no monitor sources available
+            }
+            Err(e) => {
+                // PulseAudio might not be available
+                eprintln!("System audio capture failed (expected in CI): {}", e);
+            }
+        }
+    }
+
+    #[test]
+    #[ignore] // Run with: cargo test test_system_audio_capture_extract -- --ignored
+    fn test_system_audio_capture_extract() {
+        if let Ok(capture) = SystemAudioCapture::new(None) {
+            // Wait briefly for some audio
+            std::thread::sleep(std::time::Duration::from_millis(100));
+
+            // Extract samples (may be empty if no audio playing)
+            let samples = capture.extract_samples();
+            // All samples should be valid floats
+            for &sample in &samples {
+                assert!(sample.is_finite(), "Sample should be finite");
+                assert!(
+                    sample >= -1.0 && sample <= 1.0,
+                    "Sample should be normalized"
+                );
+            }
+
+            // Buffer should be cleared after extract
+            assert_eq!(capture.buffer_len(), 0);
+        }
+    }
+
+    #[test]
+    #[ignore] // Run with: cargo test test_buffer_duration -- --ignored
+    fn test_buffer_duration() {
+        if let Ok(capture) = SystemAudioCapture::new(None) {
+            // Initial duration should be 0
+            let duration = capture.buffer_duration_secs();
+            assert!(duration >= 0.0);
+
+            // Wait for some audio
+            std::thread::sleep(std::time::Duration::from_millis(200));
+
+            // Duration should increase with captured audio
+            let duration = capture.buffer_duration_secs();
+            // May still be 0 if no system audio is playing
+            assert!(duration >= 0.0);
+        }
+    }
 }

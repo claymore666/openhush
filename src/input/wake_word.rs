@@ -428,6 +428,10 @@ impl WakeWordDetector {
 mod tests {
     use super::*;
 
+    // ===================
+    // WakeWordConfig Tests
+    // ===================
+
     #[test]
     fn test_wake_word_config_defaults() {
         let config = WakeWordConfig::default();
@@ -436,7 +440,33 @@ mod tests {
         assert!((config.sensitivity - 0.5).abs() < 0.01);
         assert!((config.threshold - 0.5).abs() < 0.01);
         assert!((config.timeout_secs - 10.0).abs() < 0.01);
+        assert!(config.beep_on_detect);
+        assert!(config.notify_on_detect);
     }
+
+    #[test]
+    fn test_wake_word_config_custom() {
+        let config = WakeWordConfig {
+            enabled: true,
+            model_path: Some("/custom/path".to_string()),
+            sensitivity: 0.7,
+            threshold: 0.8,
+            timeout_secs: 15.0,
+            beep_on_detect: false,
+            notify_on_detect: false,
+        };
+        assert!(config.enabled);
+        assert_eq!(config.model_path, Some("/custom/path".to_string()));
+        assert!((config.sensitivity - 0.7).abs() < 0.01);
+        assert!((config.threshold - 0.8).abs() < 0.01);
+        assert!((config.timeout_secs - 15.0).abs() < 0.01);
+        assert!(!config.beep_on_detect);
+        assert!(!config.notify_on_detect);
+    }
+
+    // ===================
+    // WakeWordDetector Tests
+    // ===================
 
     #[test]
     fn test_models_dir() {
@@ -444,5 +474,175 @@ mod tests {
         assert!(result.is_ok());
         let path = result.unwrap();
         assert!(path.ends_with("wake_word"));
+    }
+
+    #[test]
+    fn test_models_available_without_models() {
+        // Unless models are installed, this should return false
+        // This test verifies the function doesn't panic
+        let _ = WakeWordDetector::models_available();
+    }
+
+    #[test]
+    fn test_new_with_default_config() {
+        let config = WakeWordConfig::default();
+        let result = WakeWordDetector::new(&config);
+        // Result depends on whether models are installed
+        match result {
+            Ok(detector) => {
+                // Models are installed - verify detector is configured correctly
+                assert!((detector.timeout_secs() - 10.0).abs() < 0.01);
+                assert!(detector.beep_enabled());
+                assert!(detector.notify_enabled());
+            }
+            Err(WakeWordError::ModelNotFound(name)) => {
+                // Models not installed - verify error message
+                assert!(
+                    name == MELSPEC_MODEL || name == EMBEDDING_MODEL || name == WAKE_WORD_MODEL,
+                    "Unexpected missing model: {}",
+                    name
+                );
+            }
+            Err(e) => {
+                // Other errors (e.g., ONNX runtime issues)
+                panic!("Unexpected error: {}", e);
+            }
+        }
+    }
+
+    // ===================
+    // WakeWordEvent Tests
+    // ===================
+
+    #[test]
+    fn test_wake_word_event_creation() {
+        let event = WakeWordEvent {
+            name: "hey_jarvis".to_string(),
+            score: 0.95,
+            timestamp: std::time::Instant::now(),
+        };
+        assert_eq!(event.name, "hey_jarvis");
+        assert!((event.score - 0.95).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_wake_word_event_clone() {
+        let event = WakeWordEvent {
+            name: "hey_jarvis".to_string(),
+            score: 0.85,
+            timestamp: std::time::Instant::now(),
+        };
+        let cloned = event.clone();
+        assert_eq!(event.name, cloned.name);
+        assert!((event.score - cloned.score).abs() < 0.001);
+    }
+
+    // ===================
+    // WakeWordError Tests
+    // ===================
+
+    #[test]
+    fn test_wake_word_error_display() {
+        let err = WakeWordError::InitError("test init error".to_string());
+        assert_eq!(
+            format!("{}", err),
+            "Failed to initialize wake word detector: test init error"
+        );
+
+        let err = WakeWordError::ModelError("load failed".to_string());
+        assert_eq!(format!("{}", err), "Failed to load model: load failed");
+
+        let err = WakeWordError::ProcessError("audio issue".to_string());
+        assert_eq!(format!("{}", err), "Failed to process audio: audio issue");
+
+        let err = WakeWordError::ModelNotFound("melspectrogram.onnx".to_string());
+        assert!(format!("{}", err).contains("melspectrogram.onnx"));
+        assert!(format!("{}", err).contains("openhush model download"));
+    }
+
+    // ===================
+    // Constants Tests
+    // ===================
+
+    #[test]
+    fn test_constants() {
+        assert_eq!(WAKE_WORD_SAMPLE_RATE, 16000);
+        assert_eq!(SAMPLES_PER_FRAME, 1280); // 80ms at 16kHz
+        assert_eq!(MEL_FRAMES, 76);
+        assert_eq!(MEL_BINS, 32);
+        assert_eq!(EMBEDDING_DIM, 96);
+        assert_eq!(EMBEDDING_WINDOW, 16);
+    }
+
+    #[test]
+    fn test_model_urls_are_valid() {
+        assert!(MELSPEC_URL.starts_with("https://"));
+        assert!(MELSPEC_URL.ends_with(".onnx"));
+        assert!(EMBEDDING_URL.starts_with("https://"));
+        assert!(EMBEDDING_URL.ends_with(".onnx"));
+        assert!(WAKE_WORD_URL.starts_with("https://"));
+        assert!(WAKE_WORD_URL.ends_with(".onnx"));
+    }
+
+    // ===================
+    // Integration Tests (require models)
+    // ===================
+
+    #[test]
+    #[ignore] // Run with: cargo test test_detector_with_models -- --ignored
+    fn test_detector_with_models() {
+        let config = WakeWordConfig {
+            enabled: true,
+            sensitivity: 0.5,
+            threshold: 0.5,
+            ..Default::default()
+        };
+        let detector = WakeWordDetector::new(&config).expect("Models should be installed");
+
+        assert!((detector.timeout_secs() - 10.0).abs() < 0.01);
+        assert!(detector.beep_enabled());
+        assert!(detector.notify_enabled());
+    }
+
+    #[test]
+    #[ignore] // Run with: cargo test test_process_silence -- --ignored
+    fn test_process_silence() {
+        let config = WakeWordConfig {
+            enabled: true,
+            threshold: 0.5,
+            ..Default::default()
+        };
+        let mut detector = WakeWordDetector::new(&config).expect("Models should be installed");
+
+        // Process 1 second of silence (16000 samples)
+        let silence: Vec<f32> = vec![0.0; 16000];
+        let result = detector.process(&silence);
+
+        // Silence should not trigger wake word
+        assert!(result.is_none());
+    }
+
+    #[test]
+    #[ignore] // Run with: cargo test test_reset_clears_buffers -- --ignored
+    fn test_reset_clears_buffers() {
+        let config = WakeWordConfig {
+            enabled: true,
+            ..Default::default()
+        };
+        let mut detector = WakeWordDetector::new(&config).expect("Models should be installed");
+
+        // Process some audio
+        let noise: Vec<f32> = (0..SAMPLES_PER_FRAME * 2)
+            .map(|i| (i as f32 * 0.01).sin())
+            .collect();
+        let _ = detector.process(&noise);
+
+        // Reset should not panic and should clear state
+        detector.reset();
+
+        // After reset, processing should work normally
+        let silence: Vec<f32> = vec![0.0; SAMPLES_PER_FRAME];
+        let result = detector.process(&silence);
+        assert!(result.is_none());
     }
 }

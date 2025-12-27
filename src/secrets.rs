@@ -351,4 +351,124 @@ mod tests {
         let result = store.get(test_name);
         assert!(matches!(result, Err(SecretError::NotFound(_))));
     }
+
+    #[test]
+    #[ignore] // Run with: cargo test test_keyring_overwrite -- --ignored
+    fn test_keyring_overwrite() {
+        let store = SecretStore::new();
+        let test_name = "openhush-test-overwrite";
+
+        // Clean up
+        let _ = store.delete(test_name);
+
+        // Set initial value
+        store.set(test_name, "value1").expect("Failed to set");
+
+        // Overwrite with new value
+        store.set(test_name, "value2").expect("Failed to overwrite");
+
+        // Should get the new value
+        let retrieved = store.get(test_name).expect("Failed to get");
+        assert_eq!(retrieved, "value2");
+
+        // Cleanup
+        let _ = store.delete(test_name);
+    }
+
+    #[test]
+    #[ignore] // Run with: cargo test test_keyring_special_chars -- --ignored
+    fn test_keyring_special_chars() {
+        let store = SecretStore::new();
+        let test_name = "openhush-test-special";
+        let test_value = "p@ssw0rd!#$%^&*()_+-=[]{}|;':\",./<>?";
+
+        // Clean up
+        let _ = store.delete(test_name);
+
+        // Set value with special characters
+        store.set(test_name, test_value).expect("Failed to set");
+
+        // Retrieve and verify
+        let retrieved = store.get(test_name).expect("Failed to get");
+        assert_eq!(retrieved, test_value);
+
+        // Cleanup
+        let _ = store.delete(test_name);
+    }
+
+    #[test]
+    #[ignore] // Run with: cargo test test_keyring_unicode -- --ignored
+    fn test_keyring_unicode() {
+        let store = SecretStore::new();
+        let test_name = "openhush-test-unicode";
+        let test_value = "密码🔐пароль🔑";
+
+        // Clean up
+        let _ = store.delete(test_name);
+
+        // Set unicode value
+        store.set(test_name, test_value).expect("Failed to set");
+
+        // Retrieve and verify
+        let retrieved = store.get(test_name).expect("Failed to get");
+        assert_eq!(retrieved, test_value);
+
+        // Cleanup
+        let _ = store.delete(test_name);
+    }
+
+    #[test]
+    fn test_delete_nonexistent() {
+        let store = SecretStore::new();
+        // Deleting a non-existent secret should fail
+        let result = store.delete("openhush-definitely-does-not-exist-12345");
+        // May fail with NotFound or succeed silently depending on backend
+        // Just verify it doesn't panic
+        let _ = result;
+    }
+
+    #[test]
+    fn test_get_nonexistent() {
+        let store = SecretStore::new();
+        let result = store.get("openhush-definitely-does-not-exist-12345");
+        assert!(result.is_err());
+    }
+
+    // ===================
+    // resolve_secret Edge Cases
+    // ===================
+
+    #[test]
+    fn test_resolve_secret_empty_string() {
+        let store = SecretStore::new();
+        let result = resolve_secret("", &store);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "");
+    }
+
+    #[test]
+    fn test_resolve_secret_keyring_empty_name() {
+        let store = SecretStore::new();
+        let result = resolve_secret("keyring:", &store);
+        // Should try to look up empty name, which will fail
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_resolve_secret_not_keyring_prefix() {
+        let store = SecretStore::new();
+        // "keyring" without colon should be treated as plaintext
+        let result = resolve_secret("keyring", &store);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "keyring");
+    }
+
+    #[test]
+    fn test_resolve_secret_with_colon_in_value() {
+        let store = SecretStore::new();
+        // Value with colon but not keyring: prefix
+        let result = resolve_secret("api:key:value", &store);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "api:key:value");
+    }
 }
