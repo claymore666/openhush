@@ -3,6 +3,7 @@
 //! This module re-exports internal types for use by fuzz targets
 //! and integration tests.
 
+pub mod api;
 pub mod config;
 pub mod correction;
 pub mod daemon;

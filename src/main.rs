@@ -3,6 +3,7 @@ use tracing::info;
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
+mod api;
 mod config;
 mod context;
 mod correction;
@@ -159,6 +160,12 @@ enum Commands {
         #[command(subcommand)]
         action: SecretAction,
     },
+
+    /// Manage API keys for REST API authentication
+    ApiKey {
+        #[command(subcommand)]
+        action: ApiKeyAction,
+    },
 }
 
 /// Recording control actions (sent to daemon via D-Bus)
@@ -222,6 +229,22 @@ enum SecretAction {
 
     /// Check if keyring is available on this system
     Check,
+}
+
+/// API key management actions
+#[derive(Subcommand)]
+enum ApiKeyAction {
+    /// Generate a new random API key
+    Generate,
+
+    /// Set an API key (hashes and saves to config)
+    Set {
+        /// The API key to set
+        key: String,
+    },
+
+    /// Show if API key is configured
+    Status,
 }
 
 #[derive(Subcommand)]
@@ -706,6 +729,56 @@ async fn main() -> anyhow::Result<()> {
             }
             SecretAction::Check => {
                 secrets::cli::handle_check();
+            }
+        },
+
+        Commands::ApiKey { action } => match action {
+            ApiKeyAction::Generate => {
+                let key = api::generate_api_key();
+                let hash = api::hash_api_key(&key);
+
+                println!("Generated API key:\n");
+                println!("  {}\n", key);
+                println!("Save this key securely - it cannot be recovered!");
+                println!("\nTo configure, add to ~/.config/openhush/config.toml:\n");
+                println!("[api]");
+                println!("enabled = true");
+                println!("api_key_hash = \"{}\"", hash);
+            }
+            ApiKeyAction::Set { key } => {
+                let hash = api::hash_api_key(&key);
+                let mut config = config::Config::load()?;
+                config.api.api_key_hash = Some(hash.clone());
+                config.save()?;
+                println!("API key hash saved to config.");
+                println!("\nTo enable the API, also set:");
+                println!("[api]");
+                println!("enabled = true");
+            }
+            ApiKeyAction::Status => {
+                let config = config::Config::load()?;
+                if config.api.enabled {
+                    println!("REST API: enabled");
+                    println!("Bind address: {}", config.api.bind);
+                    if config.api.api_key_hash.is_some() {
+                        println!("API key: configured");
+                    } else {
+                        println!("API key: NOT configured (API is open!)");
+                    }
+                    println!(
+                        "Swagger UI: {}",
+                        if config.api.swagger_ui {
+                            "enabled"
+                        } else {
+                            "disabled"
+                        }
+                    );
+                } else {
+                    println!("REST API: disabled");
+                    println!("\nTo enable, add to config.toml:");
+                    println!("[api]");
+                    println!("enabled = true");
+                }
             }
         },
     }

@@ -108,6 +108,18 @@ egui = "0.29"
 # Open files/URLs
 open = "5"
 
+# REST API server
+axum = "0.8"
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+
+# OpenAPI / Swagger UI
+utoipa = { version = "5", features = ["axum_extras"] }
+utoipa-swagger-ui = { version = "9", features = ["axum"] }
+
+# API key hashing
+sha2 = "0.10"
+hex = "0.4"
+
 # Unix process management
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.29", features = ["signal", "process", "fs"] }

@@ -7,6 +7,7 @@
 //! 4. Queues recordings for async transcription
 //! 5. Outputs text to clipboard and/or pastes at cursor (in order)
 
+use crate::api::{self, ApiCommand, ApiState};
 use crate::config::{Config, CorrectionConfig, VocabularyConfig};
 use crate::correction::TextCorrector;
 #[cfg(target_os = "linux")]
@@ -31,9 +32,7 @@ use crate::vocabulary::{VocabularyError, VocabularyManager};
 use std::path::PathBuf;
 use std::sync::Arc;
 use thiserror::Error;
-use tokio::sync::mpsc;
-#[cfg(target_os = "linux")]
-use tokio::sync::RwLock;
+use tokio::sync::{mpsc, RwLock};
 use tracing::{debug, error, info, warn};
 
 /// Channel buffer size for job and result queues
@@ -442,6 +441,29 @@ impl Daemon {
             }
         };
 
+        // Initialize REST API server if enabled
+        let api_status = Arc::new(RwLock::new(api::DaemonStatus {
+            running: true,
+            recording: false,
+            queue_depth: 0,
+            model: self.config.transcription.effective_model().to_string(),
+        }));
+        let (api_cmd_tx, mut api_cmd_rx) = mpsc::channel::<ApiCommand>(CHANNEL_BUFFER_SIZE);
+        let _api_handle: Option<tokio::task::JoinHandle<anyhow::Result<()>>> =
+            if self.config.api.enabled {
+                let state = ApiState::new(
+                    api_status.clone(),
+                    api_cmd_tx.clone(),
+                    self.config.api.api_key_hash.clone(),
+                );
+                let api_config = self.config.api.clone();
+                Some(tokio::spawn(
+                    async move { api::serve(state, &api_config).await },
+                ))
+            } else {
+                None
+            };
+
         // Check if model exists
         let model_path = self.model_path()?;
         let effective_model = self.config.transcription.effective_model().to_string();
@@ -817,6 +839,90 @@ impl Daemon {
                             info!("Stop command received via IPC");
                             responder(IpcResponse::ok());
                             break; // Exit the main loop
+                        }
+                    }
+                }
+            }
+
+            // Check for REST API commands
+            if let Ok(cmd) = api_cmd_rx.try_recv() {
+                let is_recording = !matches!(self.state, DaemonState::Idle);
+                match cmd {
+                    ApiCommand::StartRecording => {
+                        if matches!(self.state, DaemonState::Idle) {
+                            info!("🎙️ Recording started via API");
+                            let mark = audio_recorder.mark();
+                            tracker.reset_dedup();
+
+                            if let Some(interval) = chunk_interval {
+                                let mut timer = tokio::time::interval(interval);
+                                timer.set_missed_tick_behavior(
+                                    tokio::time::MissedTickBehavior::Skip,
+                                );
+                                chunk_timer = Some(timer);
+                            }
+
+                            self.state = DaemonState::Recording {
+                                mark,
+                                last_chunk_pos: audio_recorder.current_position(),
+                                next_chunk_id: 0,
+                            };
+
+                            // Update API status
+                            {
+                                let mut status = api_status.write().await;
+                                status.recording = true;
+                            }
+                        }
+                    }
+                    ApiCommand::StopRecording => {
+                        if is_recording {
+                            info!("🛑 Recording stopped via API");
+                            chunk_timer = None;
+                            vad_timer = None;
+                            self.state = DaemonState::Idle;
+
+                            // Update API status
+                            {
+                                let mut status = api_status.write().await;
+                                status.recording = false;
+                            }
+                        }
+                    }
+                    ApiCommand::ToggleRecording => {
+                        if matches!(self.state, DaemonState::Idle) {
+                            info!("🎙️ Recording toggled ON via API");
+                            let mark = audio_recorder.mark();
+                            tracker.reset_dedup();
+
+                            if let Some(interval) = chunk_interval {
+                                let mut timer = tokio::time::interval(interval);
+                                timer.set_missed_tick_behavior(
+                                    tokio::time::MissedTickBehavior::Skip,
+                                );
+                                chunk_timer = Some(timer);
+                            }
+
+                            self.state = DaemonState::Recording {
+                                mark,
+                                last_chunk_pos: audio_recorder.current_position(),
+                                next_chunk_id: 0,
+                            };
+
+                            {
+                                let mut status = api_status.write().await;
+                                status.recording = true;
+                            }
+                        } else {
+                            info!("🛑 Recording toggled OFF via API");
+                            chunk_timer = None;
+                            vad_timer = None;
+                            self.state = DaemonState::Idle;
+
+                            {
+                                let mut status = api_status.write().await;
+                                status.recording = false;
+                            }
                         }
                     }
                 }

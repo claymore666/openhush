@@ -78,6 +78,10 @@ pub struct Config {
     /// Wake word detection settings ("Hey OpenHush")
     #[serde(default)]
     pub wake_word: WakeWordConfig,
+
+    /// REST API server settings
+    #[serde(default)]
+    pub api: ApiConfig,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -317,6 +321,47 @@ fn default_wake_word_threshold() -> f32 {
 
 fn default_wake_word_timeout() -> f32 {
     10.0 // 10 seconds max command length
+}
+
+/// REST API server configuration.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ApiConfig {
+    /// Enable REST API server (disabled by default for security)
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Bind address (default: 127.0.0.1:8080 - localhost only)
+    #[serde(default = "default_api_bind")]
+    pub bind: String,
+
+    /// API key hash (SHA-256) for authentication.
+    /// Generate with: `openhush api-key generate`
+    #[serde(default)]
+    pub api_key_hash: Option<String>,
+
+    /// Enable Swagger UI at /swagger-ui/
+    #[serde(default = "default_true")]
+    pub swagger_ui: bool,
+
+    /// Allowed CORS origins (empty = same-origin only)
+    #[serde(default)]
+    pub cors_origins: Vec<String>,
+}
+
+impl Default for ApiConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false, // Disabled by default for security
+            bind: default_api_bind(),
+            api_key_hash: None,
+            swagger_ui: true,
+            cors_origins: vec![],
+        }
+    }
+}
+
+fn default_api_bind() -> String {
+    "127.0.0.1:8080".to_string()
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
