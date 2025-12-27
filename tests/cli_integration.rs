@@ -190,10 +190,7 @@ fn test_service_help() {
 #[test]
 fn test_service_status() {
     // Service status should work
-    openhush()
-        .args(["service", "status"])
-        .assert()
-        .success();
+    openhush().args(["service", "status"]).assert().success();
 }
 
 // ===================
@@ -258,7 +255,7 @@ fn test_transcribe_help() {
         .assert()
         .success()
         .stdout(predicate::str::contains("--model"))
-        .stdout(predicate::str::contains("--output"));
+        .stdout(predicate::str::contains("--format"));
 }
 
 #[test]
