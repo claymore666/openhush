@@ -5,7 +5,7 @@
 //! 2. embedding_model.onnx: Mel spectrogram → Speech embeddings (96-dim)
 //! 3. hey_jarvis.onnx: Accumulated embeddings (1536-dim) → Detection probability
 //!
-//! Models from: https://github.com/dscripka/openWakeWord
+//! Models from: <https://github.com/dscripka/openWakeWord>
 
 use crate::config::{Config, WakeWordConfig};
 use ort::session::{builder::GraphOptimizationLevel, Session};
