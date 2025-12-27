@@ -82,6 +82,10 @@ pub struct Config {
     /// REST API server settings
     #[serde(default)]
     pub api: ApiConfig,
+
+    /// Meeting summarization settings
+    #[serde(default)]
+    pub summarization: SummarizationConfig,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -362,6 +366,128 @@ impl Default for ApiConfig {
 
 fn default_api_bind() -> String {
     "127.0.0.1:8080".to_string()
+}
+
+/// Meeting summarization configuration
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SummarizationConfig {
+    /// Enable summarization feature
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Default LLM provider: "ollama" or "openai"
+    #[serde(default = "default_summarization_provider")]
+    pub default_provider: String,
+
+    /// Default template name (standup, meeting, retro, 1on1, summary)
+    #[serde(default = "default_summarization_template")]
+    pub default_template: String,
+
+    /// Path to custom templates file (optional)
+    #[serde(default)]
+    pub templates_path: Option<String>,
+
+    /// Ollama-specific settings
+    #[serde(default)]
+    pub ollama: SummarizationOllamaConfig,
+
+    /// OpenAI-compatible API settings
+    #[serde(default)]
+    pub openai: SummarizationOpenAiConfig,
+}
+
+impl Default for SummarizationConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            default_provider: default_summarization_provider(),
+            default_template: default_summarization_template(),
+            templates_path: None,
+            ollama: SummarizationOllamaConfig::default(),
+            openai: SummarizationOpenAiConfig::default(),
+        }
+    }
+}
+
+fn default_summarization_provider() -> String {
+    "ollama".to_string()
+}
+
+fn default_summarization_template() -> String {
+    "meeting".to_string()
+}
+
+fn default_summarization_timeout() -> u32 {
+    120 // 2 minutes for long transcripts
+}
+
+/// Ollama settings for summarization
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SummarizationOllamaConfig {
+    /// Ollama API URL
+    #[serde(default = "default_ollama_url")]
+    pub url: String,
+
+    /// Model name for summarization
+    #[serde(default = "default_summarization_ollama_model")]
+    pub model: String,
+
+    /// Request timeout in seconds
+    #[serde(default = "default_summarization_timeout")]
+    pub timeout_secs: u32,
+}
+
+impl Default for SummarizationOllamaConfig {
+    fn default() -> Self {
+        Self {
+            url: default_ollama_url(),
+            model: default_summarization_ollama_model(),
+            timeout_secs: default_summarization_timeout(),
+        }
+    }
+}
+
+fn default_summarization_ollama_model() -> String {
+    "llama3.2:3b".to_string()
+}
+
+/// OpenAI-compatible API settings for summarization
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SummarizationOpenAiConfig {
+    /// API key (supports "keyring:" prefix for secure storage)
+    #[serde(default)]
+    pub api_key: String,
+
+    /// Model name
+    #[serde(default = "default_openai_model")]
+    pub model: String,
+
+    /// Base URL (override for compatible APIs like Groq, Claude, etc.)
+    #[serde(default = "default_openai_base_url")]
+    pub base_url: String,
+
+    /// Request timeout in seconds
+    #[serde(default = "default_summarization_timeout")]
+    pub timeout_secs: u32,
+}
+
+impl Default for SummarizationOpenAiConfig {
+    fn default() -> Self {
+        Self {
+            api_key: String::new(),
+            model: default_openai_model(),
+            base_url: default_openai_base_url(),
+            timeout_secs: default_summarization_timeout(),
+        }
+    }
+}
+
+fn default_openai_model() -> String {
+    "gpt-4o-mini".to_string()
+}
+
+fn default_openai_base_url() -> String {
+    "https://api.openai.com/v1".to_string()
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

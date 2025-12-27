@@ -1,13 +1,14 @@
 **OpenHush Wiki**
 
 - [Home](Home)
+- [User Guide](User-Guide)
+- [API Reference](API-Reference)
 - [Architecture](Architecture)
 - [Components](Components)
 - [Platform Support](Platform-Support)
+- [Plugin System](Plugin-System)
 - [Product Vision](Product-Vision)
 - [Market Analysis](Market-Analysis)
-- [Plugin System](Plugin-System)
-- [User Guide](User-Guide)
 
 ---
 
@@ -20,4 +21,4 @@
 
 ---
 
-**Version:** v0.5.0
+**Version:** v0.6.0

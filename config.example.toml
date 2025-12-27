@@ -71,3 +71,43 @@ auto_detect = true
 # Specific GPU device IDs to use (empty = use all available)
 # Example: devices = [0, 1]
 devices = []
+
+# Meeting summarization settings
+# Use: openhush summarize <file>
+[summarization]
+# Enable summarization feature
+enabled = true
+
+# Default LLM provider: "ollama" or "openai"
+default_provider = "ollama"
+
+# Default template: "meeting", "standup", "retro", "1on1", "summary"
+default_template = "meeting"
+
+# Ollama settings for summarization
+[summarization.ollama]
+# Ollama API endpoint
+url = "http://localhost:11434"
+
+# Model to use (must be pulled: ollama pull llama3.2:3b)
+model = "llama3.2:3b"
+
+# Request timeout in seconds
+timeout_secs = 120
+
+# OpenAI-compatible API settings
+# Also works with: Claude API, Groq, local OpenAI-compatible servers
+[summarization.openai]
+# API key (use "keyring:openai-api" to read from system keyring)
+api_key = "keyring:openai-api"
+
+# Model name
+model = "gpt-4o-mini"
+
+# API base URL (change for compatible APIs)
+# OpenAI: https://api.openai.com/v1
+# Groq: https://api.groq.com/openai/v1
+base_url = "https://api.openai.com/v1"
+
+# Request timeout in seconds
+timeout_secs = 120

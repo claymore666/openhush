@@ -19,8 +19,10 @@ pub mod output;
 pub mod panic_handler;
 pub mod platform;
 pub mod queue;
+pub mod secrets;
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 pub mod service;
+pub mod summarization;
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 pub mod tray;
 pub mod vad;

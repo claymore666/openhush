@@ -27,6 +27,7 @@ mod recording;
 mod secrets;
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 mod service;
+mod summarization;
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 mod tray;
 mod vad;
@@ -165,6 +166,36 @@ enum Commands {
     ApiKey {
         #[command(subcommand)]
         action: ApiKeyAction,
+    },
+
+    /// Summarize a transcription or audio file using LLM
+    Summarize {
+        /// Input file (transcription text or audio file)
+        input: String,
+
+        /// Template to use (standup, meeting, retro, 1on1, summary)
+        #[arg(short, long, default_value = "meeting")]
+        template: String,
+
+        /// LLM provider (ollama, openai)
+        #[arg(short, long)]
+        provider: Option<String>,
+
+        /// Model name (overrides config)
+        #[arg(short, long)]
+        model: Option<String>,
+
+        /// Output file (default: stdout)
+        #[arg(short, long)]
+        output: Option<String>,
+
+        /// Output format (markdown, json)
+        #[arg(short = 'f', long, default_value = "markdown")]
+        format: String,
+
+        /// List available templates
+        #[arg(long)]
+        list_templates: bool,
     },
 }
 
@@ -781,6 +812,171 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         },
+
+        Commands::Summarize {
+            input,
+            template,
+            provider,
+            model,
+            output,
+            format,
+            list_templates,
+        } => {
+            if list_templates {
+                summarization::list_templates();
+                return Ok(());
+            }
+
+            let config = config::Config::load()?;
+
+            // Read input: text file or audio file
+            let transcript = if input.ends_with(".txt") || input.ends_with(".md") {
+                std::fs::read_to_string(&input)
+                    .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", input, e))?
+            } else if input.ends_with(".wav")
+                || input.ends_with(".mp3")
+                || input.ends_with(".m4a")
+                || input.ends_with(".flac")
+            {
+                // Transcribe audio file first
+                use std::path::Path;
+
+                eprintln!("Transcribing audio file...");
+                let file_path = Path::new(&input);
+                let audio = input::load_wav_file(file_path, config.audio.resampling_quality)?;
+
+                // Initialize Whisper engine
+                let data_dir = config::Config::data_dir()?;
+                let model_name = config.transcription.effective_model();
+                let model: engine::whisper::WhisperModel = model_name.parse().map_err(|()| {
+                    anyhow::anyhow!(
+                        "Unknown model '{}'. Available: tiny, base, small, medium, large-v3",
+                        model_name
+                    )
+                })?;
+                let model_path = data_dir.join("models").join(model.filename());
+
+                if !model_path.exists() {
+                    anyhow::bail!(
+                        "Model not found: {}\nRun: openhush model download {}",
+                        model_path.display(),
+                        model_name
+                    );
+                }
+
+                let engine = engine::whisper::WhisperEngine::new(
+                    &model_path,
+                    &config.transcription.language,
+                    config.transcription.translate,
+                    config.transcription.device.to_lowercase() != "cpu",
+                )?;
+                let result = engine.transcribe(&audio)?;
+                result.text
+            } else {
+                // Assume it's raw text from stdin or a text file
+                std::fs::read_to_string(&input)
+                    .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", input, e))?
+            };
+
+            // Determine provider
+            let provider_name = provider.unwrap_or(config.summarization.default_provider.clone());
+
+            // Create LLM provider
+            let llm_provider: Box<dyn summarization::LlmProvider> =
+                match provider_name.as_str() {
+                    "ollama" => {
+                        let mut ollama_config = summarization::OllamaConfig {
+                            url: config.summarization.ollama.url.clone(),
+                            model: config.summarization.ollama.model.clone(),
+                            timeout_secs: config.summarization.ollama.timeout_secs,
+                        };
+                        if let Some(m) = model.as_ref() {
+                            ollama_config.model = m.clone();
+                        }
+                        Box::new(summarization::OllamaProvider::new(ollama_config))
+                    }
+                    "openai" => {
+                        let store = secrets::SecretStore::new();
+                        let api_key =
+                            secrets::resolve_secret(&config.summarization.openai.api_key, &store)
+                                .map_err(|e| anyhow::anyhow!("Failed to resolve API key: {}", e))?;
+
+                        let mut openai_config = summarization::OpenAiConfig {
+                            api_key,
+                            model: config.summarization.openai.model.clone(),
+                            base_url: config.summarization.openai.base_url.clone(),
+                            timeout_secs: config.summarization.openai.timeout_secs,
+                        };
+                        if let Some(m) = model.as_ref() {
+                            openai_config.model = m.clone();
+                        }
+                        Box::new(summarization::OpenAiProvider::new(openai_config).map_err(
+                            |e| anyhow::anyhow!("Failed to create OpenAI provider: {}", e),
+                        )?)
+                    }
+                    _ => {
+                        anyhow::bail!(
+                            "Unknown provider '{}'. Use 'ollama' or 'openai'.",
+                            provider_name
+                        );
+                    }
+                };
+
+            // Check provider availability
+            let rt = tokio::runtime::Runtime::new()?;
+            if !rt.block_on(llm_provider.is_available()) {
+                eprintln!(
+                    "Warning: {} provider may not be available. Attempting anyway...",
+                    provider_name
+                );
+            }
+
+            // Create summarizer
+            let summarizer = summarization::Summarizer::new(llm_provider);
+
+            // Create context
+            let ctx = summarization::TemplateContext::new(
+                transcript,
+                chrono::Utc::now().format("%Y-%m-%d").to_string(),
+                "unknown".to_string(), // TODO: extract from audio metadata
+            );
+
+            // Use configured or specified template
+            let template_name = if template == "meeting" {
+                config.summarization.default_template.clone()
+            } else {
+                template
+            };
+
+            // Run summarization
+            eprintln!("Summarizing with template '{}'...", template_name);
+            let result = rt
+                .block_on(summarizer.summarize(&template_name, &ctx))
+                .map_err(|e| anyhow::anyhow!("Summarization failed: {}", e))?;
+
+            // Output result
+            let output_text = match format.as_str() {
+                "json" => {
+                    let json = serde_json::json!({
+                        "summary": result.summary,
+                        "template": result.template_used,
+                        "provider": result.provider_used,
+                        "model": result.model_used,
+                        "tokens_used": result.tokens_used,
+                    });
+                    serde_json::to_string_pretty(&json)?
+                }
+                _ => result.summary,
+            };
+
+            if let Some(output_path) = output {
+                std::fs::write(&output_path, &output_text)
+                    .map_err(|e| anyhow::anyhow!("Failed to write {}: {}", output_path, e))?;
+                eprintln!("Summary written to {}", output_path);
+            } else {
+                println!("{}", output_text);
+            }
+        }
     }
 
     Ok(())

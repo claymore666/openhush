@@ -119,6 +119,7 @@ utoipa-swagger-ui = { version = "9", features = ["axum"] }
 # API key hashing
 sha2 = "0.10"
 hex = "0.4"
+async-trait = "0.1.89"
 
 # Unix process management
 [target.'cfg(unix)'.dependencies]
