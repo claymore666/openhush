@@ -388,9 +388,26 @@ async fn main() -> anyhow::Result<()> {
                 };
                 use std::io::Write;
 
+                // Handle wake-word model download separately
+                if name == "wake-word" {
+                    use input::wake_word::WakeWordDetector;
+
+                    if WakeWordDetector::models_available() {
+                        println!("Wake word models already downloaded.");
+                        return Ok(());
+                    }
+
+                    println!("Downloading wake word models (~3.7 MB)...");
+                    WakeWordDetector::download_models().await.map_err(|e| {
+                        anyhow::anyhow!("Failed to download wake word models: {}", e)
+                    })?;
+                    println!("Wake word models downloaded successfully.");
+                    return Ok(());
+                }
+
                 let model: WhisperModel = name.parse().map_err(|()| {
                     anyhow::anyhow!(
-                        "Unknown model '{}'. Available: tiny, base, small, medium, large-v3",
+                        "Unknown model '{}'. Available: tiny, base, small, medium, large-v3, wake-word",
                         name
                     )
                 })?;
@@ -447,6 +464,27 @@ async fn main() -> anyhow::Result<()> {
                         engine::whisper::WhisperModel::LargeV3 => "Best accuracy, slowest",
                     };
                     println!("  {:<12} {:<10} {:<10} {}", name, size, status, desc);
+                }
+
+                // Show wake-word model status
+                println!("\nWake word models:\n");
+                println!(
+                    "  {:<12} {:<10} {:<10} Description",
+                    "Model", "Size", "Status"
+                );
+                println!("  {}", "-".repeat(60));
+                {
+                    use input::wake_word::WakeWordDetector;
+                    let status = if WakeWordDetector::models_available() {
+                        "✓ local"
+                    } else {
+                        "remote"
+                    };
+                    let desc = "\"Hey Jarvis\" wake word detection";
+                    println!(
+                        "  {:<12} {:<10} {:<10} {}",
+                        "wake-word", "~3.7 MB", status, desc
+                    );
                 }
 
                 println!("\nUse 'openhush model download <name>' to download a model.");

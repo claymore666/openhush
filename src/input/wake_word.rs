@@ -16,6 +16,7 @@ use thiserror::Error;
 use tracing::{debug, info};
 
 /// Sample rate expected by openWakeWord (16kHz)
+#[allow(dead_code)] // Public API for consumers
 pub const WAKE_WORD_SAMPLE_RATE: u32 = 16000;
 
 /// Samples per frame for mel spectrogram (80ms at 16kHz = 1280 samples)
@@ -72,6 +73,7 @@ pub struct WakeWordEvent {
     /// Detection score (0.0 - 1.0)
     pub score: f32,
     /// Timestamp when detected
+    #[allow(dead_code)] // Available for future timeout tracking
     pub timestamp: std::time::Instant,
 }
 
@@ -406,6 +408,7 @@ impl WakeWordDetector {
     }
 
     /// Get the configured timeout in seconds.
+    #[allow(dead_code)] // Available for future timeout handling
     pub fn timeout_secs(&self) -> f32 {
         self.config.timeout_secs
     }

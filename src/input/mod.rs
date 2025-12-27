@@ -5,7 +5,6 @@ pub mod hotkey;
 pub mod ring_buffer;
 #[cfg(target_os = "linux")]
 pub mod system_audio;
-#[allow(dead_code)] // TODO: Remove after integrating with daemon
 pub mod wake_word;
 
 pub use audio::{load_wav_file, AudioBuffer, AudioRecorder, AudioRecorderError};

@@ -14,11 +14,12 @@ use crate::dbus::{DaemonCommand, DaemonStatus, DbusService};
 use crate::engine::{WhisperEngine, WhisperError};
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 use crate::gui;
+use crate::input::wake_word::{WakeWordDetector, WakeWordError};
 use crate::input::{AudioMark, AudioRecorder, AudioRecorderError, HotkeyEvent, HotkeyListener};
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use crate::ipc::{IpcCommand, IpcResponse, IpcServer};
 use crate::output::{ActionContext, ActionRunner, OutputError, OutputHandler};
-use crate::platform::{CurrentPlatform, Platform};
+use crate::platform::{AudioFeedback, CurrentPlatform, Notifier, Platform};
 use crate::queue::{
     worker::spawn_worker, TranscriptionJob, TranscriptionResult, TranscriptionTracker,
 };
@@ -290,6 +291,9 @@ pub enum DaemonError {
     #[error("Vocabulary error: {0}")]
     Vocabulary(#[from] VocabularyError),
 
+    #[error("Wake word error: {0}")]
+    WakeWord(#[from] WakeWordError),
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
@@ -531,10 +535,39 @@ impl Daemon {
             prebuffer_secs, resampling_quality
         );
 
-        // Initialize VAD if enabled (for continuous dictation mode)
+        // Initialize VAD if enabled (for continuous dictation mode or wake word)
         let vad_config = self.config.vad.clone();
         let is_continuous_mode = self.config.hotkey.mode == "continuous";
-        let (mut vad_engine, mut vad_state) = init_vad(&vad_config, is_continuous_mode)?;
+        let wake_word_enabled = self.config.wake_word.enabled;
+        let (mut vad_engine, mut vad_state) =
+            init_vad(&vad_config, is_continuous_mode || wake_word_enabled)?;
+
+        // Initialize wake word detector if enabled
+        let mut wake_word_detector: Option<WakeWordDetector> = if wake_word_enabled {
+            if !WakeWordDetector::models_available() {
+                warn!("Wake word models not found. Run: openhush model download wake-word");
+                None
+            } else {
+                match WakeWordDetector::new(&self.config.wake_word) {
+                    Ok(detector) => {
+                        info!(
+                            "Wake word detection enabled (threshold: {:.2})",
+                            self.config.wake_word.threshold
+                        );
+                        Some(detector)
+                    }
+                    Err(e) => {
+                        warn!("Failed to initialize wake word detector: {}. Continuing without wake word.", e);
+                        None
+                    }
+                }
+            }
+        } else {
+            None
+        };
+
+        // Wake word processing position tracker
+        let mut wake_word_last_pos: usize = 0;
 
         // Initialize vocabulary manager if enabled
         let vocabulary_manager = init_vocabulary(&self.config.vocabulary).await;
@@ -600,6 +633,16 @@ impl Daemon {
 
         // VAD timer (for continuous dictation mode)
         let mut vad_timer: Option<tokio::time::Interval> = None;
+
+        // Wake word timer (always on when enabled)
+        let mut wake_word_timer: Option<tokio::time::Interval> = if wake_word_detector.is_some() {
+            let mut timer =
+                tokio::time::interval(tokio::time::Duration::from_millis(VAD_PROCESS_INTERVAL_MS));
+            timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            Some(timer)
+        } else {
+            None
+        };
 
         if is_continuous_mode {
             info!(
@@ -1130,6 +1173,82 @@ impl Daemon {
                             Ok(false) => {} // No changes
                             Err(e) => {
                                 warn!("Failed to reload vocabulary: {}", e);
+                            }
+                        }
+                    }
+                }
+
+                // Handle wake word timer tick (always-on listening)
+                _ = async {
+                    if let Some(timer) = &mut wake_word_timer {
+                        timer.tick().await;
+                    } else {
+                        std::future::pending::<()>().await;
+                    }
+                } => {
+                    // Only process wake word when in Idle state
+                    if matches!(self.state, DaemonState::Idle) {
+                        if let Some(ref mut detector) = wake_word_detector {
+                            let current_pos = audio_recorder.current_position();
+
+                            // Extract new audio since last processed position
+                            if current_pos > wake_word_last_pos {
+                                if let Some(buffer) = audio_recorder.extract_chunk(wake_word_last_pos, current_pos) {
+                                    // Feed samples to wake word detector
+                                    if let Some(event) = detector.process(&buffer.samples) {
+                                        info!(
+                                            "🗣️ Wake word detected: \"{}\" (score: {:.2})",
+                                            event.name, event.score
+                                        );
+
+                                        // Play beep and/or show notification if enabled
+                                        if detector.beep_enabled() {
+                                            if let Err(e) = self.platform.play_start_sound() {
+                                                debug!("Failed to play wake word beep: {}", e);
+                                            }
+                                        }
+                                        if detector.notify_enabled() {
+                                            if let Err(e) = self.platform.notify("OpenHush", "Wake word detected - listening...") {
+                                                debug!("Failed to show wake word notification: {}", e);
+                                            }
+                                        }
+
+                                        // Reset detector to avoid repeated detections
+                                        detector.reset();
+
+                                        // Start recording with VAD-based termination
+                                        let mark = audio_recorder.mark();
+                                        let start_pos = audio_recorder.current_position();
+                                        tracker.reset_dedup();
+
+                                        // Start VAD timer for speech detection
+                                        let mut timer = tokio::time::interval(
+                                            tokio::time::Duration::from_millis(VAD_PROCESS_INTERVAL_MS)
+                                        );
+                                        timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                                        vad_timer = Some(timer);
+
+                                        // Reset VAD state for new recording
+                                        if let Some(ref mut state) = vad_state {
+                                            state.reset();
+                                        }
+                                        if let Some(ref mut engine) = vad_engine {
+                                            engine.reset();
+                                        }
+
+                                        // Transition to continuous recording mode with VAD
+                                        self.state = DaemonState::ContinuousRecording {
+                                            mark,
+                                            speech_start_pos: None,
+                                            last_vad_pos: start_pos,
+                                            next_chunk_id: 0,
+                                        };
+
+                                        // Track timeout for wake word recording
+                                        // TODO: Add timeout handling based on detector.timeout_secs()
+                                    }
+                                }
+                                wake_word_last_pos = current_pos;
                             }
                         }
                     }
