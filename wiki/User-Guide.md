@@ -255,6 +255,51 @@ openhush recording toggle
 openhush recording status
 ```
 
+### Status Bar Integration (Waybar/Polybar)
+
+OpenHush provides scripts for status bar integration on Linux:
+
+**Waybar** (`~/.config/waybar/config`):
+```json
+"custom/openhush": {
+    "exec": "/path/to/openhush/contrib/status-bar/waybar-openhush.sh",
+    "return-type": "json",
+    "interval": 1,
+    "on-click": "openhush recording toggle"
+}
+```
+
+**Waybar styling** (`~/.config/waybar/style.css`):
+```css
+#custom-openhush.recording {
+    color: #f38ba8;
+    animation: pulse 1s ease-in-out infinite;
+}
+#custom-openhush.listening {
+    color: #a6e3a1;
+}
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+```
+
+**Polybar** (`~/.config/polybar/config.ini`):
+```ini
+[module/openhush]
+type = custom/script
+exec = /path/to/openhush/contrib/status-bar/polybar-openhush.sh --polybar-colors
+interval = 1
+click-left = openhush recording toggle
+```
+
+**Icons shown:**
+- 󰍬 Idle (ready)
+- 󰍮 Listening for wake word
+- 󰑊 Recording
+- 󰔟 Processing transcription
+- 󰍭 Daemon not running
+
 ### Preferences GUI
 
 ```bash
