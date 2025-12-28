@@ -829,8 +829,8 @@ pub struct AudioConfig {
 
     /// Channel selection for multi-channel audio sources.
     /// - "all": capture all channels and mix to mono (default)
-    /// - [0]: capture only channel 0
-    /// - [0, 1]: capture channels 0 and 1, mix to mono
+    /// - \[0\]: capture only channel 0
+    /// - \[0, 1\]: capture channels 0 and 1, mix to mono
     #[serde(default)]
     pub channels: ChannelSelection,
 

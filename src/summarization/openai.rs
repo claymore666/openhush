@@ -68,7 +68,7 @@ pub struct OpenAiConfig {
     pub api_key: String,
     /// Model name (e.g., "gpt-4o-mini", "claude-3-haiku-20240307")
     pub model: String,
-    /// Base URL (e.g., "https://api.openai.com/v1")
+    /// Base URL (e.g., `https://api.openai.com/v1`)
     pub base_url: String,
     /// Request timeout in seconds
     pub timeout_secs: u32,
