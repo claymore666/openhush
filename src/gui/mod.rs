@@ -59,6 +59,8 @@ struct PreferencesApp {
     active_tab: Tab,
     unsaved_changes: bool,
     status_message: Option<(String, std::time::Instant)>,
+    /// Temporary string for channel selection input
+    channels_input: String,
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -79,11 +81,21 @@ impl PreferencesApp {
     }
 
     fn with_config(config: Config) -> Self {
+        use crate::config::ChannelSelection;
+        let channels_input = match &config.audio.channels {
+            ChannelSelection::All => "all".to_string(),
+            ChannelSelection::Select(chs) => chs
+                .iter()
+                .map(|c| c.to_string())
+                .collect::<Vec<_>>()
+                .join(", "),
+        };
         Self {
             config,
             active_tab: Tab::Hotkey,
             unsaved_changes: false,
             status_message: None,
+            channels_input,
         }
     }
 

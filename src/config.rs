@@ -25,6 +25,114 @@ pub enum ConfigError {
     ValidationError(String),
 }
 
+/// Channel selection for audio input.
+///
+/// Specifies which channels to capture from multi-channel audio sources.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChannelSelection {
+    /// Capture all channels and mix to mono (default)
+    All,
+    /// Capture only the specified channels (0-indexed) and mix to mono
+    Select(Vec<u8>),
+}
+
+impl Default for ChannelSelection {
+    fn default() -> Self {
+        Self::All
+    }
+}
+
+impl Serialize for ChannelSelection {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            ChannelSelection::All => serializer.serialize_str("all"),
+            ChannelSelection::Select(channels) => channels.serialize(serializer),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ChannelSelection {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::{self, Visitor};
+
+        struct ChannelSelectionVisitor;
+
+        impl<'de> Visitor<'de> for ChannelSelectionVisitor {
+            type Value = ChannelSelection;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("\"all\" or an array of channel indices")
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                if value.eq_ignore_ascii_case("all") {
+                    Ok(ChannelSelection::All)
+                } else {
+                    Err(de::Error::custom(format!(
+                        "expected \"all\" or array, got \"{}\"",
+                        value
+                    )))
+                }
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: de::SeqAccess<'de>,
+            {
+                let mut channels = Vec::new();
+                while let Some(ch) = seq.next_element()? {
+                    channels.push(ch);
+                }
+                if channels.is_empty() {
+                    Ok(ChannelSelection::All)
+                } else {
+                    Ok(ChannelSelection::Select(channels))
+                }
+            }
+        }
+
+        deserializer.deserialize_any(ChannelSelectionVisitor)
+    }
+}
+
+impl ChannelSelection {
+    /// Parse from a comma-separated string (for CLI)
+    pub fn from_cli_arg(s: &str) -> Result<Self, String> {
+        let s = s.trim();
+        if s.eq_ignore_ascii_case("all") || s.is_empty() {
+            return Ok(Self::All);
+        }
+
+        let channels: Result<Vec<u8>, _> = s
+            .split(',')
+            .map(|part| {
+                part.trim()
+                    .parse::<u8>()
+                    .map_err(|_| format!("Invalid channel number: {}", part))
+            })
+            .collect();
+
+        channels.map(Self::Select)
+    }
+
+    /// Get channel indices, or None for all channels
+    pub fn indices(&self) -> Option<&[u8]> {
+        match self {
+            ChannelSelection::All => None,
+            ChannelSelection::Select(channels) => Some(channels),
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct Config {
     #[serde(default)]
@@ -723,6 +831,13 @@ pub struct AudioConfig {
     #[serde(default)]
     pub resampling_quality: ResamplingQuality,
 
+    /// Channel selection for multi-channel audio sources.
+    /// - "all": capture all channels and mix to mono (default)
+    /// - [0]: capture only channel 0
+    /// - [0, 1]: capture channels 0 and 1, mix to mono
+    #[serde(default)]
+    pub channels: ChannelSelection,
+
     /// Enable/disable all preprocessing
     #[serde(default)]
     pub preprocessing: bool,
@@ -749,6 +864,7 @@ impl Default for AudioConfig {
         Self {
             prebuffer_duration_secs: default_prebuffer_duration(),
             resampling_quality: ResamplingQuality::default(),
+            channels: ChannelSelection::default(),
             preprocessing: false,
             normalization: NormalizationConfig::default(),
             compression: CompressionConfig::default(),
