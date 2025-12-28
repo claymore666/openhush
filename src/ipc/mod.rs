@@ -47,6 +47,12 @@ pub enum IpcCommand {
     Status,
     #[serde(rename = "stop")]
     Stop,
+    /// Load the Whisper model into GPU memory
+    #[serde(rename = "load_model")]
+    LoadModel,
+    /// Unload the Whisper model to free GPU memory
+    #[serde(rename = "unload_model")]
+    UnloadModel,
 }
 
 /// Response from daemon.
@@ -57,6 +63,8 @@ pub struct IpcResponse {
     pub running: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub recording: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_loaded: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -69,16 +77,18 @@ impl IpcResponse {
             ok: true,
             running: None,
             recording: None,
+            model_loaded: None,
             version: None,
             error: None,
         }
     }
 
-    pub fn status(recording: bool) -> Self {
+    pub fn status(recording: bool, model_loaded: bool) -> Self {
         Self {
             ok: true,
             running: Some(true),
             recording: Some(recording),
+            model_loaded: Some(model_loaded),
             version: Some(env!("CARGO_PKG_VERSION").to_string()),
             error: None,
         }
@@ -89,6 +99,7 @@ impl IpcResponse {
             ok: false,
             running: None,
             recording: None,
+            model_loaded: None,
             version: None,
             error: Some(msg.to_string()),
         }

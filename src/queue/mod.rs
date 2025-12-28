@@ -7,6 +7,8 @@
 
 pub mod worker;
 
+pub use worker::WorkerCommand;
+
 use crate::config::BackpressureStrategy;
 use crate::input::AudioBuffer;
 use std::collections::{BTreeMap, HashSet};

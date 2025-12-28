@@ -13,6 +13,10 @@ pub enum DaemonCommand {
     StartRecording,
     StopRecording,
     ToggleRecording,
+    /// Load the Whisper model into GPU memory
+    LoadModel,
+    /// Unload the Whisper model to free GPU memory
+    UnloadModel,
 }
 
 /// Shared state exposed via D-Bus properties.
@@ -20,6 +24,8 @@ pub enum DaemonCommand {
 pub struct DaemonStatus {
     pub is_recording: bool,
     pub queue_depth: u32,
+    /// Whether the Whisper model is currently loaded
+    pub model_loaded: bool,
 }
 
 /// D-Bus interface implementation for the daemon.
@@ -69,13 +75,33 @@ impl DaemonInterface {
         Ok(())
     }
 
+    /// Load the Whisper model into GPU memory.
+    async fn load_model(&self) -> zbus::fdo::Result<()> {
+        self.command_tx
+            .send(DaemonCommand::LoadModel)
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to send command: {}", e)))?;
+        Ok(())
+    }
+
+    /// Unload the Whisper model to free GPU memory.
+    async fn unload_model(&self) -> zbus::fdo::Result<()> {
+        self.command_tx
+            .send(DaemonCommand::UnloadModel)
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to send command: {}", e)))?;
+        Ok(())
+    }
+
     /// Get current daemon status as a string.
     async fn get_status(&self) -> String {
         let status = self.status.read().await;
         if status.is_recording {
             "recording".to_string()
-        } else {
+        } else if status.model_loaded {
             "idle".to_string()
+        } else {
+            "standby".to_string()
         }
     }
 
@@ -89,6 +115,12 @@ impl DaemonInterface {
     #[zbus(property)]
     async fn queue_depth(&self) -> u32 {
         self.status.read().await.queue_depth
+    }
+
+    /// Whether the Whisper model is currently loaded.
+    #[zbus(property)]
+    async fn model_loaded(&self) -> bool {
+        self.status.read().await.model_loaded
     }
 
     /// Daemon version.

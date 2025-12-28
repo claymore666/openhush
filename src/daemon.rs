@@ -23,6 +23,7 @@ use crate::output::{ActionContext, ActionRunner, OutputError, OutputHandler};
 use crate::platform::{AudioFeedback, CurrentPlatform, Notifier, Platform};
 use crate::queue::{
     worker::spawn_worker, TranscriptionJob, TranscriptionResult, TranscriptionTracker,
+    WorkerCommand,
 };
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 use crate::tray::{TrayEvent, TrayManager};
@@ -375,6 +376,31 @@ impl Daemon {
         Ok(path)
     }
 
+    /// Create a new Whisper engine with the configured model.
+    ///
+    /// This method can be called to load/reload the model on demand.
+    fn create_engine(&self) -> Result<WhisperEngine, DaemonError> {
+        let model_path = self.model_path()?;
+        let effective_model = self.config.transcription.effective_model().to_string();
+
+        if !model_path.exists() {
+            return Err(DaemonError::Whisper(WhisperError::ModelNotFound(
+                model_path,
+                effective_model,
+            )));
+        }
+
+        let use_gpu = self.config.transcription.device.to_lowercase() != "cpu";
+        let engine = WhisperEngine::new(
+            &model_path,
+            &self.config.transcription.language,
+            self.config.transcription.translate,
+            use_gpu,
+        )?;
+
+        Ok(engine)
+    }
+
     /// Main daemon loop
     pub async fn run_loop(&mut self, enable_tray: bool) -> Result<(), DaemonError> {
         info!(
@@ -414,8 +440,13 @@ impl Daemon {
         }
 
         // Initialize D-Bus service (Linux only)
+        // Note: model_loaded will be updated after engine is loaded
         #[cfg(target_os = "linux")]
-        let dbus_status = Arc::new(RwLock::new(DaemonStatus::default()));
+        let dbus_status = Arc::new(RwLock::new(DaemonStatus {
+            is_recording: false,
+            queue_depth: 0,
+            model_loaded: self.config.transcription.preload,
+        }));
         #[cfg(target_os = "linux")]
         let (dbus_service, mut dbus_rx) = match DbusService::start(dbus_status.clone()).await {
             Ok((service, rx)) => (Some(service), Some(rx)),
@@ -464,7 +495,7 @@ impl Daemon {
                 None
             };
 
-        // Check if model exists
+        // Check if model exists (even for lazy loading, we verify at startup)
         let model_path = self.model_path()?;
         let effective_model = self.config.transcription.effective_model().to_string();
         if !model_path.exists() {
@@ -479,45 +510,62 @@ impl Daemon {
             )));
         }
 
-        let use_gpu = self.config.transcription.device.to_lowercase() != "cpu";
-        info!("Loading Whisper model (GPU: {})...", use_gpu);
-        let engine = WhisperEngine::new(
-            &model_path,
-            &self.config.transcription.language,
-            self.config.transcription.translate,
-            use_gpu,
-        )?;
-        info!(
-            "Model loaded successfully (translate={}, device={})",
-            self.config.transcription.translate, self.config.transcription.device
-        );
-
-        // Determine chunk interval (auto-tune or configured)
-        let configured_interval = self.config.queue.chunk_interval_secs;
-        let chunk_interval_secs = if configured_interval <= 0.0 {
-            // Auto-tune mode: run GPU benchmark to determine optimal interval
-            match engine.benchmark(self.config.queue.chunk_safety_margin) {
-                Ok(result) => {
-                    info!(
-                        "Auto-tuned chunk interval: {:.2}s (GPU overhead: {:.2}s)",
-                        result.recommended_chunk_interval, result.overhead_secs
-                    );
-                    result.recommended_chunk_interval
-                }
-                Err(e) => {
-                    warn!(
-                        "GPU benchmark failed ({}), using fallback interval of 5.0s",
-                        e
-                    );
-                    5.0 // Fallback to safe default
-                }
-            }
-        } else {
+        // Load engine based on preload config
+        let preload = self.config.transcription.preload;
+        let (initial_engine, chunk_interval_secs) = if preload {
+            let use_gpu = self.config.transcription.device.to_lowercase() != "cpu";
+            info!("Loading Whisper model (GPU: {})...", use_gpu);
+            let engine = WhisperEngine::new(
+                &model_path,
+                &self.config.transcription.language,
+                self.config.transcription.translate,
+                use_gpu,
+            )?;
             info!(
-                "Using configured chunk interval: {:.2}s",
-                configured_interval
+                "Model loaded successfully (translate={}, device={})",
+                self.config.transcription.translate, self.config.transcription.device
             );
-            configured_interval
+
+            // Determine chunk interval (auto-tune or configured)
+            let configured_interval = self.config.queue.chunk_interval_secs;
+            let chunk_interval_secs = if configured_interval <= 0.0 {
+                // Auto-tune mode: run GPU benchmark to determine optimal interval
+                match engine.benchmark(self.config.queue.chunk_safety_margin) {
+                    Ok(result) => {
+                        info!(
+                            "Auto-tuned chunk interval: {:.2}s (GPU overhead: {:.2}s)",
+                            result.recommended_chunk_interval, result.overhead_secs
+                        );
+                        result.recommended_chunk_interval
+                    }
+                    Err(e) => {
+                        warn!(
+                            "GPU benchmark failed ({}), using fallback interval of 5.0s",
+                            e
+                        );
+                        5.0 // Fallback to safe default
+                    }
+                }
+            } else {
+                info!(
+                    "Using configured chunk interval: {:.2}s",
+                    configured_interval
+                );
+                configured_interval
+            };
+
+            (Some(engine), chunk_interval_secs)
+        } else {
+            info!("Lazy loading enabled - model will be loaded on first transcription request");
+            // Use configured interval or default when lazy loading
+            let configured_interval = self.config.queue.chunk_interval_secs;
+            let chunk_interval_secs = if configured_interval <= 0.0 {
+                info!("Using default chunk interval (5.0s) for lazy loading mode");
+                5.0
+            } else {
+                configured_interval
+            };
+            (None, chunk_interval_secs)
         };
 
         if self.config.audio.noise_reduction.enabled {
@@ -623,17 +671,38 @@ impl Daemon {
         // Initialize text corrector if enabled
         let text_corrector = init_corrector(&self.config.correction).await;
 
-        // Create transcription job and result channels
-        let (job_tx, job_rx) = mpsc::channel(CHANNEL_BUFFER_SIZE);
+        // Create transcription command and result channels
+        let (command_tx, command_rx) = mpsc::channel::<WorkerCommand>(CHANNEL_BUFFER_SIZE);
         let (result_tx, mut result_rx) = mpsc::channel(CHANNEL_BUFFER_SIZE);
 
         // Spawn transcription worker in dedicated thread
         let audio_config = self.config.audio.clone();
-        let worker_handle = spawn_worker(engine, job_rx, result_tx, audio_config)?;
+        let worker_handle = spawn_worker(initial_engine, command_rx, result_tx, audio_config)?;
         info!("Transcription worker started");
+
+        // Track model loaded state (for macOS/Windows IPC; Linux uses dbus_status)
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        let mut model_loaded = preload;
 
         // Result tracker for ordered output
         let mut tracker = TranscriptionTracker::new();
+
+        // Idle timeout tracking for model unloading
+        let idle_unload_secs = self.config.transcription.idle_unload_secs;
+        let mut last_transcription_time: Option<std::time::Instant> = if preload {
+            Some(std::time::Instant::now()) // Start tracking from daemon start
+        } else {
+            None // No tracking until first transcription when lazy loading
+        };
+
+        // Idle check timer (runs every 10 seconds if idle unload is enabled)
+        let mut idle_check_timer: Option<tokio::time::Interval> = if idle_unload_secs > 0 {
+            let mut timer = tokio::time::interval(tokio::time::Duration::from_secs(10));
+            timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            Some(timer)
+        } else {
+            None
+        };
 
         // Initialize hotkey listener
         let (hotkey_listener, mut hotkey_rx) = HotkeyListener::new(&self.config.hotkey.key)?;
@@ -832,6 +901,45 @@ impl Daemon {
                                 }
                             }
                         }
+                        DaemonCommand::LoadModel => {
+                            let status = dbus_status.read().await;
+                            if status.model_loaded {
+                                info!("Model already loaded, ignoring load request");
+                            } else {
+                                drop(status);
+                                info!("Loading Whisper model via D-Bus command...");
+                                match self.create_engine() {
+                                    Ok(engine) => {
+                                        if command_tx
+                                            .send(WorkerCommand::LoadEngine(engine))
+                                            .await
+                                            .is_ok()
+                                        {
+                                            let mut status = dbus_status.write().await;
+                                            status.model_loaded = true;
+                                            info!("Model loaded successfully");
+                                        }
+                                    }
+                                    Err(e) => {
+                                        error!("Failed to load model: {}", e);
+                                    }
+                                }
+                            }
+                        }
+                        DaemonCommand::UnloadModel => {
+                            let status = dbus_status.read().await;
+                            if !status.model_loaded {
+                                info!("Model already unloaded, ignoring unload request");
+                            } else {
+                                drop(status);
+                                info!("Unloading Whisper model via D-Bus command...");
+                                if command_tx.send(WorkerCommand::UnloadEngine).await.is_ok() {
+                                    let mut status = dbus_status.write().await;
+                                    status.model_loaded = false;
+                                    info!("Model unloaded successfully");
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -843,12 +951,59 @@ impl Daemon {
                     match cmd {
                         IpcCommand::Status => {
                             let is_recording = !matches!(self.state, DaemonState::Idle);
-                            responder(IpcResponse::status(is_recording));
+                            responder(IpcResponse::status(is_recording, model_loaded));
                         }
                         IpcCommand::Stop => {
                             info!("Stop command received via IPC");
                             responder(IpcResponse::ok());
                             break; // Exit the main loop
+                        }
+                        IpcCommand::LoadModel => {
+                            if model_loaded {
+                                info!("Model already loaded, ignoring load request");
+                                responder(IpcResponse::ok());
+                            } else {
+                                info!("Loading Whisper model via IPC command...");
+                                match self.create_engine() {
+                                    Ok(engine) => {
+                                        if command_tx
+                                            .send(WorkerCommand::LoadEngine(engine))
+                                            .await
+                                            .is_ok()
+                                        {
+                                            model_loaded = true;
+                                            info!("Model loaded successfully");
+                                            responder(IpcResponse::ok());
+                                        } else {
+                                            responder(IpcResponse::error(
+                                                "Failed to send to worker",
+                                            ));
+                                        }
+                                    }
+                                    Err(e) => {
+                                        error!("Failed to load model: {}", e);
+                                        responder(IpcResponse::error(&format!(
+                                            "Failed to load model: {}",
+                                            e
+                                        )));
+                                    }
+                                }
+                            }
+                        }
+                        IpcCommand::UnloadModel => {
+                            if !model_loaded {
+                                info!("Model already unloaded, ignoring unload request");
+                                responder(IpcResponse::ok());
+                            } else {
+                                info!("Unloading Whisper model via IPC command...");
+                                if command_tx.send(WorkerCommand::UnloadEngine).await.is_ok() {
+                                    model_loaded = false;
+                                    info!("Model unloaded successfully");
+                                    responder(IpcResponse::ok());
+                                } else {
+                                    responder(IpcResponse::error("Failed to send to worker"));
+                                }
+                            }
                         }
                     }
                 }
@@ -1051,6 +1206,45 @@ impl Daemon {
                                         #[cfg(unix)]
                                         notify_backpressure(bp.notify);
                                     } else {
+                                        // Auto-load model if not loaded (lazy loading)
+                                        #[cfg(target_os = "linux")]
+                                        {
+                                            let status = dbus_status.read().await;
+                                            if !status.model_loaded {
+                                                drop(status);
+                                                info!("Auto-loading model for transcription...");
+                                                match self.create_engine() {
+                                                    Ok(engine) => {
+                                                        if command_tx.send(WorkerCommand::LoadEngine(engine)).await.is_ok() {
+                                                            let mut status = dbus_status.write().await;
+                                                            status.model_loaded = true;
+                                                            last_transcription_time = Some(std::time::Instant::now());
+                                                            info!("Model auto-loaded successfully");
+                                                        }
+                                                    }
+                                                    Err(e) => {
+                                                        error!("Failed to auto-load model: {}", e);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        #[cfg(any(target_os = "macos", target_os = "windows"))]
+                                        if !model_loaded {
+                                            info!("Auto-loading model for transcription...");
+                                            match self.create_engine() {
+                                                Ok(engine) => {
+                                                    if command_tx.send(WorkerCommand::LoadEngine(engine)).await.is_ok() {
+                                                        model_loaded = true;
+                                                        last_transcription_time = Some(std::time::Instant::now());
+                                                        info!("Model auto-loaded successfully");
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    error!("Failed to auto-load model: {}", e);
+                                                }
+                                            }
+                                        }
+
                                         // Submit final job only if accepted
                                         let job = TranscriptionJob {
                                             buffer,
@@ -1058,7 +1252,7 @@ impl Daemon {
                                             chunk_id: next_chunk_id,
                                             is_final: true,
                                         };
-                                        job_tx.send(job).await.map_err(|_| {
+                                        command_tx.send(WorkerCommand::Job(job)).await.map_err(|_| {
                                             error!("Transcription worker failed - channel closed");
                                             DaemonError::WorkerFailed
                                         })?;
@@ -1096,6 +1290,9 @@ impl Daemon {
                         result.text.len()
                     );
 
+                    // Update last transcription time for idle timeout tracking
+                    last_transcription_time = Some(std::time::Instant::now());
+
                     // Add to tracker
                     tracker.add_result(result);
 
@@ -1126,6 +1323,45 @@ impl Daemon {
                         std::future::pending::<()>().await;
                     }
                 } => {
+                    // Auto-load model before checking state (avoids borrow conflict)
+                    #[cfg(target_os = "linux")]
+                    {
+                        let status = dbus_status.read().await;
+                        if !status.model_loaded {
+                            drop(status);
+                            info!("Auto-loading model for streaming transcription...");
+                            match self.create_engine() {
+                                Ok(engine) => {
+                                    if command_tx.send(WorkerCommand::LoadEngine(engine)).await.is_ok() {
+                                        let mut status = dbus_status.write().await;
+                                        status.model_loaded = true;
+                                        last_transcription_time = Some(std::time::Instant::now());
+                                        info!("Model auto-loaded successfully");
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("Failed to auto-load model: {}", e);
+                                }
+                            }
+                        }
+                    }
+                    #[cfg(any(target_os = "macos", target_os = "windows"))]
+                    if !model_loaded {
+                        info!("Auto-loading model for streaming transcription...");
+                        match self.create_engine() {
+                            Ok(engine) => {
+                                if command_tx.send(WorkerCommand::LoadEngine(engine)).await.is_ok() {
+                                    model_loaded = true;
+                                    last_transcription_time = Some(std::time::Instant::now());
+                                    info!("Model auto-loaded successfully");
+                                }
+                            }
+                            Err(e) => {
+                                error!("Failed to auto-load model: {}", e);
+                            }
+                        }
+                    }
+
                     if let DaemonState::Recording { ref mark, ref mut last_chunk_pos, ref mut next_chunk_id } = self.state {
                         let current_pos = audio_recorder.current_position();
                         debug!(
@@ -1168,7 +1404,7 @@ impl Daemon {
                                     chunk_id: *next_chunk_id,
                                     is_final: false,
                                 };
-                                job_tx.send(job).await.map_err(|_| {
+                                command_tx.send(WorkerCommand::Job(job)).await.map_err(|_| {
                                     error!("Transcription worker failed - channel closed");
                                     DaemonError::WorkerFailed
                                 })?;
@@ -1191,6 +1427,45 @@ impl Daemon {
                         std::future::pending::<()>().await;
                     }
                 } => {
+                    // Auto-load model before checking state (avoids borrow conflict)
+                    #[cfg(target_os = "linux")]
+                    {
+                        let status = dbus_status.read().await;
+                        if !status.model_loaded {
+                            drop(status);
+                            info!("Auto-loading model for VAD transcription...");
+                            match self.create_engine() {
+                                Ok(engine) => {
+                                    if command_tx.send(WorkerCommand::LoadEngine(engine)).await.is_ok() {
+                                        let mut status = dbus_status.write().await;
+                                        status.model_loaded = true;
+                                        last_transcription_time = Some(std::time::Instant::now());
+                                        info!("Model auto-loaded successfully");
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("Failed to auto-load model: {}", e);
+                                }
+                            }
+                        }
+                    }
+                    #[cfg(any(target_os = "macos", target_os = "windows"))]
+                    if !model_loaded {
+                        info!("Auto-loading model for VAD transcription...");
+                        match self.create_engine() {
+                            Ok(engine) => {
+                                if command_tx.send(WorkerCommand::LoadEngine(engine)).await.is_ok() {
+                                    model_loaded = true;
+                                    last_transcription_time = Some(std::time::Instant::now());
+                                    info!("Model auto-loaded successfully");
+                                }
+                            }
+                            Err(e) => {
+                                error!("Failed to auto-load model: {}", e);
+                            }
+                        }
+                    }
+
                     if let DaemonState::ContinuousRecording {
                         ref mark,
                         ref mut speech_start_pos,
@@ -1251,7 +1526,7 @@ impl Daemon {
                                                         chunk_id: *next_chunk_id,
                                                         is_final: false, // Continuous mode, more may come
                                                     };
-                                                    job_tx.send(job).await.map_err(|_| {
+                                                    command_tx.send(WorkerCommand::Job(job)).await.map_err(|_| {
                                                         error!("Transcription worker failed - channel closed");
                                                         DaemonError::WorkerFailed
                                                     })?;
@@ -1370,6 +1645,50 @@ impl Daemon {
                     }
                 }
 
+                // Handle idle timeout check (unload model after inactivity)
+                _ = async {
+                    if let Some(timer) = &mut idle_check_timer {
+                        timer.tick().await;
+                    } else {
+                        std::future::pending::<()>().await;
+                    }
+                } => {
+                    // Check if model should be unloaded due to inactivity
+                    if let Some(last_time) = last_transcription_time {
+                        let elapsed = last_time.elapsed().as_secs();
+                        if elapsed >= idle_unload_secs as u64 {
+                            // Check if model is loaded before trying to unload
+                            #[cfg(target_os = "linux")]
+                            let should_unload = {
+                                let status = dbus_status.read().await;
+                                status.model_loaded
+                            };
+                            #[cfg(any(target_os = "macos", target_os = "windows"))]
+                            let should_unload = model_loaded;
+
+                            if should_unload {
+                                info!(
+                                    "Unloading model due to {} seconds of inactivity",
+                                    elapsed
+                                );
+                                if command_tx.send(WorkerCommand::UnloadEngine).await.is_ok() {
+                                    #[cfg(target_os = "linux")]
+                                    {
+                                        let mut status = dbus_status.write().await;
+                                        status.model_loaded = false;
+                                    }
+                                    #[cfg(any(target_os = "macos", target_os = "windows"))]
+                                    {
+                                        model_loaded = false;
+                                    }
+                                    last_transcription_time = None; // Stop tracking until next load
+                                    info!("Model unloaded successfully (idle timeout)");
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Handle shutdown signal (Ctrl+C)
                 _ = tokio::signal::ctrl_c() => {
                     info!("Shutdown signal received (SIGINT)");
@@ -1384,7 +1703,7 @@ impl Daemon {
 
         // Cleanup
         hotkey_listener.stop();
-        drop(job_tx); // Signal worker to stop by closing the channel
+        drop(command_tx); // Signal worker to stop by closing the channel
 
         // Wait for worker thread to finish (with timeout)
         info!("Waiting for transcription worker to finish...");
@@ -1792,6 +2111,12 @@ pub async fn status() -> Result<(), DaemonError> {
                         }
                         if let Some(recording) = response.recording {
                             println!("  Recording: {}", if recording { "yes" } else { "no" });
+                        }
+                        if let Some(model_loaded) = response.model_loaded {
+                            println!(
+                                "  Model: {}",
+                                if model_loaded { "loaded" } else { "not loaded" }
+                            );
                         }
                         return Ok(());
                     }

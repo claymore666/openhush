@@ -114,6 +114,18 @@ impl DbusClient {
         proxy.toggle_recording().await
     }
 
+    /// Load the Whisper model into GPU memory.
+    pub async fn load_model(&self) -> Result<()> {
+        let proxy = DaemonProxy::new(&self.connection).await?;
+        proxy.load_model().await
+    }
+
+    /// Unload the Whisper model to free GPU memory.
+    pub async fn unload_model(&self) -> Result<()> {
+        let proxy = DaemonProxy::new(&self.connection).await?;
+        proxy.unload_model().await
+    }
+
     /// Get current status.
     pub async fn get_status(&self) -> Result<String> {
         let proxy = DaemonProxy::new(&self.connection).await?;
@@ -130,6 +142,12 @@ impl DbusClient {
     pub async fn queue_depth(&self) -> Result<u32> {
         let proxy = DaemonProxy::new(&self.connection).await?;
         proxy.queue_depth().await
+    }
+
+    /// Get model loaded state.
+    pub async fn model_loaded(&self) -> Result<bool> {
+        let proxy = DaemonProxy::new(&self.connection).await?;
+        proxy.model_loaded().await
     }
 
     /// Get daemon version.
@@ -149,6 +167,8 @@ trait Daemon {
     fn start_recording(&self) -> zbus::Result<()>;
     fn stop_recording(&self) -> zbus::Result<()>;
     fn toggle_recording(&self) -> zbus::Result<()>;
+    fn load_model(&self) -> zbus::Result<()>;
+    fn unload_model(&self) -> zbus::Result<()>;
     fn get_status(&self) -> zbus::Result<String>;
 
     #[zbus(property)]
@@ -156,6 +176,9 @@ trait Daemon {
 
     #[zbus(property)]
     fn queue_depth(&self) -> zbus::Result<u32>;
+
+    #[zbus(property)]
+    fn model_loaded(&self) -> zbus::Result<bool>;
 
     #[zbus(property)]
     fn version(&self) -> zbus::Result<String>;

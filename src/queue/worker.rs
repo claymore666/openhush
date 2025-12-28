@@ -3,24 +3,49 @@
 //! Runs in a dedicated thread to avoid blocking the main async loop.
 //! Receives jobs from a channel, processes them with Whisper, and sends
 //! results back for ordered output.
+//!
+//! Supports dynamic model loading/unloading for GPU memory management.
 
 use crate::config::AudioConfig;
 use crate::engine::WhisperEngine;
 use crate::input::AudioBuffer;
 use tokio::sync::mpsc;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use super::{TranscriptionJob, TranscriptionResult};
+
+/// Commands that can be sent to the transcription worker.
+pub enum WorkerCommand {
+    /// Process a transcription job
+    Job(TranscriptionJob),
+    /// Load a new Whisper engine (replaces existing if any)
+    LoadEngine(WhisperEngine),
+    /// Unload the current engine to free GPU memory
+    UnloadEngine,
+}
+
+impl std::fmt::Debug for WorkerCommand {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Job(job) => f.debug_tuple("Job").field(job).finish(),
+            Self::LoadEngine(_) => f.debug_tuple("LoadEngine").field(&"<engine>").finish(),
+            Self::UnloadEngine => write!(f, "UnloadEngine"),
+        }
+    }
+}
 
 /// Background transcription worker.
 ///
 /// Runs in a dedicated thread with blocking receives to avoid async
 /// overhead in the GPU transcription path.
+///
+/// The engine is held as `Option<WhisperEngine>` to support dynamic
+/// loading and unloading for GPU memory management.
 pub struct TranscriptionWorker {
-    /// Whisper engine for transcription
-    engine: WhisperEngine,
-    /// Channel to receive jobs
-    job_rx: mpsc::Receiver<TranscriptionJob>,
+    /// Whisper engine for transcription (None if unloaded)
+    engine: Option<WhisperEngine>,
+    /// Channel to receive commands (jobs, load, unload)
+    command_rx: mpsc::Receiver<WorkerCommand>,
     /// Channel to send results
     result_tx: mpsc::Sender<TranscriptionResult>,
     /// Audio preprocessing config
@@ -31,19 +56,19 @@ impl TranscriptionWorker {
     /// Create a new transcription worker.
     ///
     /// # Arguments
-    /// * `engine` - Pre-loaded Whisper engine
-    /// * `job_rx` - Channel to receive transcription jobs
+    /// * `engine` - Optional pre-loaded Whisper engine (None for lazy loading)
+    /// * `command_rx` - Channel to receive worker commands
     /// * `result_tx` - Channel to send completed results
     /// * `audio_config` - Audio preprocessing configuration
     pub fn new(
-        engine: WhisperEngine,
-        job_rx: mpsc::Receiver<TranscriptionJob>,
+        engine: Option<WhisperEngine>,
+        command_rx: mpsc::Receiver<WorkerCommand>,
         result_tx: mpsc::Sender<TranscriptionResult>,
         audio_config: AudioConfig,
     ) -> Self {
         Self {
             engine,
-            job_rx,
+            command_rx,
             result_tx,
             audio_config,
         }
@@ -51,70 +76,120 @@ impl TranscriptionWorker {
 
     /// Run the worker loop (blocking, runs in dedicated thread).
     ///
-    /// This method blocks on receiving jobs and runs until the channel is closed.
+    /// This method blocks on receiving commands and runs until the channel is closed.
     /// It should be spawned in a dedicated thread:
     ///
     /// ```ignore
     /// std::thread::spawn(move || worker.run());
     /// ```
     pub fn run(mut self) {
-        info!("Transcription worker started");
+        info!(
+            "Transcription worker started (engine: {})",
+            if self.engine.is_some() {
+                "loaded"
+            } else {
+                "not loaded"
+            }
+        );
 
-        while let Some(job) = self.job_rx.blocking_recv() {
-            let sequence_id = job.sequence_id;
-            let total_start = std::time::Instant::now();
-            debug!(
-                "Processing transcription job (sequence_id: {})",
-                sequence_id
-            );
-
-            // Preprocess audio
-            let preprocess_start = std::time::Instant::now();
-            let mut buffer = job.buffer;
-            let audio_duration_secs = buffer.duration_secs();
-            Self::preprocess_audio(&mut buffer, &self.audio_config);
-            let preprocess_ms = preprocess_start.elapsed().as_millis();
-
-            // Transcribe
-            let transcribe_start = std::time::Instant::now();
-            let text = match self.engine.transcribe(&buffer) {
-                Ok(result) => result.text,
-                Err(e) => {
-                    error!("Transcription failed (sequence_id: {}): {}", sequence_id, e);
-                    String::new()
+        while let Some(command) = self.command_rx.blocking_recv() {
+            match command {
+                WorkerCommand::Job(job) => {
+                    self.process_job(job);
                 }
-            };
-            let transcribe_ms = transcribe_start.elapsed().as_millis();
-            let total_ms = total_start.elapsed().as_millis();
-
-            // Log timing breakdown
-            info!(
-                "⏱️  Timing (seq {}.{}{}): audio={:.1}s | preprocess={}ms | transcribe={}ms | total={}ms | ratio={:.2}x",
-                sequence_id,
-                job.chunk_id,
-                if job.is_final { " FINAL" } else { "" },
-                audio_duration_secs,
-                preprocess_ms,
-                transcribe_ms,
-                total_ms,
-                total_ms as f32 / (audio_duration_secs * 1000.0)
-            );
-
-            // Send result
-            let result = TranscriptionResult {
-                text,
-                sequence_id,
-                chunk_id: job.chunk_id,
-                is_final: job.is_final,
-                duration_secs: audio_duration_secs,
-            };
-            if self.result_tx.blocking_send(result).is_err() {
-                debug!("Result channel closed, worker shutting down");
-                break;
+                WorkerCommand::LoadEngine(engine) => {
+                    info!("Loading Whisper engine in worker thread");
+                    self.engine = Some(engine);
+                }
+                WorkerCommand::UnloadEngine => {
+                    if self.engine.is_some() {
+                        info!("Unloading Whisper engine to free GPU memory");
+                        self.engine = None;
+                    } else {
+                        debug!("UnloadEngine received but engine already unloaded");
+                    }
+                }
             }
         }
 
         info!("Transcription worker stopped");
+    }
+
+    /// Process a single transcription job.
+    fn process_job(&mut self, job: TranscriptionJob) {
+        let sequence_id = job.sequence_id;
+        let chunk_id = job.chunk_id;
+        let is_final = job.is_final;
+
+        // Check if engine is loaded
+        let Some(engine) = &self.engine else {
+            warn!(
+                "Transcription job (seq {}.{}) received but model not loaded",
+                sequence_id, chunk_id
+            );
+            // Send empty result to avoid blocking the result tracker
+            let result = TranscriptionResult {
+                text: String::new(),
+                sequence_id,
+                chunk_id,
+                is_final,
+                duration_secs: 0.0,
+            };
+            if self.result_tx.blocking_send(result).is_err() {
+                debug!("Result channel closed, worker shutting down");
+            }
+            return;
+        };
+
+        let total_start = std::time::Instant::now();
+        debug!(
+            "Processing transcription job (sequence_id: {})",
+            sequence_id
+        );
+
+        // Preprocess audio
+        let preprocess_start = std::time::Instant::now();
+        let mut buffer = job.buffer;
+        let audio_duration_secs = buffer.duration_secs();
+        Self::preprocess_audio(&mut buffer, &self.audio_config);
+        let preprocess_ms = preprocess_start.elapsed().as_millis();
+
+        // Transcribe
+        let transcribe_start = std::time::Instant::now();
+        let text = match engine.transcribe(&buffer) {
+            Ok(result) => result.text,
+            Err(e) => {
+                error!("Transcription failed (sequence_id: {}): {}", sequence_id, e);
+                String::new()
+            }
+        };
+        let transcribe_ms = transcribe_start.elapsed().as_millis();
+        let total_ms = total_start.elapsed().as_millis();
+
+        // Log timing breakdown
+        info!(
+            "⏱️  Timing (seq {}.{}{}): audio={:.1}s | preprocess={}ms | transcribe={}ms | total={}ms | ratio={:.2}x",
+            sequence_id,
+            chunk_id,
+            if is_final { " FINAL" } else { "" },
+            audio_duration_secs,
+            preprocess_ms,
+            transcribe_ms,
+            total_ms,
+            total_ms as f32 / (audio_duration_secs * 1000.0)
+        );
+
+        // Send result
+        let result = TranscriptionResult {
+            text,
+            sequence_id,
+            chunk_id,
+            is_final,
+            duration_secs: audio_duration_secs,
+        };
+        if self.result_tx.blocking_send(result).is_err() {
+            debug!("Result channel closed, worker shutting down");
+        }
     }
 
     /// Apply audio preprocessing (noise reduction, normalization, compression, limiter).
@@ -170,23 +245,23 @@ impl TranscriptionWorker {
 /// Returns a handle to the thread for optional join on shutdown.
 ///
 /// # Arguments
-/// * `engine` - Pre-loaded Whisper engine
-/// * `job_rx` - Channel to receive transcription jobs
+/// * `engine` - Optional pre-loaded Whisper engine (None for lazy loading)
+/// * `command_rx` - Channel to receive worker commands (jobs, load, unload)
 /// * `result_tx` - Channel to send completed results
 /// * `audio_config` - Audio preprocessing configuration
 ///
 /// # Errors
 /// Returns an error if the thread cannot be spawned (rare, usually resource exhaustion).
 pub fn spawn_worker(
-    engine: WhisperEngine,
-    job_rx: mpsc::Receiver<TranscriptionJob>,
+    engine: Option<WhisperEngine>,
+    command_rx: mpsc::Receiver<WorkerCommand>,
     result_tx: mpsc::Sender<TranscriptionResult>,
     audio_config: AudioConfig,
 ) -> std::io::Result<std::thread::JoinHandle<()>> {
     std::thread::Builder::new()
         .name("transcription-worker".to_string())
         .spawn(move || {
-            let worker = TranscriptionWorker::new(engine, job_rx, result_tx, audio_config);
+            let worker = TranscriptionWorker::new(engine, command_rx, result_tx, audio_config);
             worker.run();
         })
 }

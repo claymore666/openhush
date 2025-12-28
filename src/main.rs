@@ -294,6 +294,12 @@ enum ModelAction {
         /// Model name
         name: String,
     },
+
+    /// Load model into GPU memory (requires running daemon)
+    Load,
+
+    /// Unload model from GPU memory (requires running daemon)
+    Unload,
 }
 
 /// Guard that must be kept alive for file logging to work
@@ -570,6 +576,116 @@ async fn main() -> anyhow::Result<()> {
 
                 remove_model(model)?;
                 println!("Removed model: {}", model.filename());
+            }
+            ModelAction::Load => {
+                #[cfg(target_os = "linux")]
+                {
+                    use dbus::DbusClient;
+
+                    let client = match DbusClient::connect().await {
+                        Ok(c) => c,
+                        Err(e) => {
+                            eprintln!("Failed to connect to D-Bus: {}", e);
+                            std::process::exit(1);
+                        }
+                    };
+
+                    if !client.is_daemon_running().await {
+                        eprintln!("Daemon is not running. Start it with: openhush start");
+                        std::process::exit(1);
+                    }
+
+                    match client.load_model().await {
+                        Ok(()) => println!("Model loaded successfully"),
+                        Err(e) => {
+                            eprintln!("Failed to load model: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+
+                #[cfg(any(target_os = "macos", target_os = "windows"))]
+                {
+                    use crate::ipc::{IpcClient, IpcCommand};
+
+                    let mut client = match IpcClient::connect() {
+                        Ok(c) => c,
+                        Err(e) => {
+                            eprintln!("Failed to connect to daemon: {}", e);
+                            std::process::exit(1);
+                        }
+                    };
+
+                    match client.send(IpcCommand::LoadModel) {
+                        Ok(response) => {
+                            if response.ok {
+                                println!("Model loaded successfully");
+                            } else if let Some(err) = response.error {
+                                eprintln!("Failed to load model: {}", err);
+                                std::process::exit(1);
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to load model: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+            }
+            ModelAction::Unload => {
+                #[cfg(target_os = "linux")]
+                {
+                    use dbus::DbusClient;
+
+                    let client = match DbusClient::connect().await {
+                        Ok(c) => c,
+                        Err(e) => {
+                            eprintln!("Failed to connect to D-Bus: {}", e);
+                            std::process::exit(1);
+                        }
+                    };
+
+                    if !client.is_daemon_running().await {
+                        eprintln!("Daemon is not running. Start it with: openhush start");
+                        std::process::exit(1);
+                    }
+
+                    match client.unload_model().await {
+                        Ok(()) => println!("Model unloaded successfully"),
+                        Err(e) => {
+                            eprintln!("Failed to unload model: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+
+                #[cfg(any(target_os = "macos", target_os = "windows"))]
+                {
+                    use crate::ipc::{IpcClient, IpcCommand};
+
+                    let mut client = match IpcClient::connect() {
+                        Ok(c) => c,
+                        Err(e) => {
+                            eprintln!("Failed to connect to daemon: {}", e);
+                            std::process::exit(1);
+                        }
+                    };
+
+                    match client.send(IpcCommand::UnloadModel) {
+                        Ok(response) => {
+                            if response.ok {
+                                println!("Model unloaded successfully");
+                            } else if let Some(err) = response.error {
+                                eprintln!("Failed to unload model: {}", err);
+                                std::process::exit(1);
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to unload model: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
             }
         },
 

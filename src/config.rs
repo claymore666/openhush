@@ -656,6 +656,16 @@ pub struct TranscriptionConfig {
     /// Translate to English (instead of transcribing in original language)
     #[serde(default)]
     pub translate: bool,
+
+    /// Unload model after N seconds of inactivity (0 = never unload).
+    /// Useful for freeing GPU memory when not in use.
+    #[serde(default)]
+    pub idle_unload_secs: u32,
+
+    /// Pre-load model on daemon start.
+    /// If false, model is loaded lazily on first transcription request.
+    #[serde(default = "default_true")]
+    pub preload: bool,
 }
 
 impl TranscriptionConfig {
@@ -1055,6 +1065,8 @@ impl Default for TranscriptionConfig {
             language: default_language(),
             device: default_device(),
             translate: false,
+            idle_unload_secs: 0,
+            preload: true,
         }
     }
 }
@@ -1386,6 +1398,8 @@ mod tests {
         assert_eq!(config.transcription.language, "auto");
         assert_eq!(config.transcription.device, "cuda");
         assert!(!config.transcription.translate);
+        assert_eq!(config.transcription.idle_unload_secs, 0);
+        assert!(config.transcription.preload);
         assert!(config.output.clipboard);
         assert!(config.output.paste);
         assert!(!config.correction.enabled);
