@@ -430,6 +430,16 @@ pub fn load_wav_file(
     Ok(buffer)
 }
 
+/// Channel selection for audio capture
+#[derive(Debug, Clone, Default)]
+pub enum ChannelMix {
+    /// Mix all channels to mono
+    #[default]
+    All,
+    /// Mix only specific channels (0-indexed) to mono
+    Select(Vec<u8>),
+}
+
 /// Audio recorder for capturing microphone input.
 ///
 /// Uses an always-on ring buffer for low-latency capture:
@@ -446,6 +456,10 @@ pub struct AudioRecorder {
     ring_buffer: Arc<AudioRingBuffer>,
     /// Resampling quality setting
     resampling_quality: ResamplingQuality,
+    /// Number of channels being captured from device
+    device_channels: u16,
+    /// Which channels to mix for output
+    channel_mix: Arc<ChannelMix>,
 }
 
 impl AudioRecorder {
@@ -461,6 +475,20 @@ impl AudioRecorder {
     pub fn new_always_on(
         prebuffer_secs: f32,
         resampling_quality: ResamplingQuality,
+    ) -> Result<Self, AudioRecorderError> {
+        Self::new_always_on_with_channels(prebuffer_secs, resampling_quality, ChannelMix::All)
+    }
+
+    /// Create a new always-on audio recorder with channel selection.
+    ///
+    /// # Arguments
+    /// * `prebuffer_secs` - Duration of audio to buffer (e.g., 30.0 seconds)
+    /// * `resampling_quality` - Quality of audio resampling (low=linear, high=sinc)
+    /// * `channel_mix` - Which channels to mix for output
+    pub fn new_always_on_with_channels(
+        prebuffer_secs: f32,
+        resampling_quality: ResamplingQuality,
+        channel_mix: ChannelMix,
     ) -> Result<Self, AudioRecorderError> {
         let host = cpal::default_host();
 
@@ -480,19 +508,30 @@ impl AudioRecorder {
             .map_err(|e| AudioRecorderError::NoInputConfig(e.to_string()))?;
 
         let device_sample_rate = supported_config.sample_rate();
+        let device_channels = supported_config.channels();
+
+        // Determine if we need multi-channel capture
+        let use_multi_channel = matches!(&channel_mix, ChannelMix::Select(chs) if !chs.is_empty());
+        let capture_channels = if use_multi_channel {
+            device_channels
+        } else {
+            1 // Request mono if we're mixing all channels anyway
+        };
+
         info!(
-            "Device sample rate: {} Hz (will resample to {} Hz)",
-            device_sample_rate, SAMPLE_RATE
+            "Device: {} Hz, {} channels (capturing {} ch, mixing {:?})",
+            device_sample_rate, device_channels, capture_channels, channel_mix
         );
 
-        // Build config for mono capture
+        // Build config for capture
         let config = StreamConfig {
-            channels: 1,
+            channels: capture_channels,
             sample_rate: device_sample_rate,
             buffer_size: cpal::BufferSize::Default,
         };
 
         // Create ring buffer at device sample rate (we resample on extract)
+        // Ring buffer always stores mono audio after mixing
         let ring_buffer = Arc::new(AudioRingBuffer::new(prebuffer_secs, device_sample_rate));
 
         let mut recorder = Self {
@@ -502,6 +541,8 @@ impl AudioRecorder {
             device_sample_rate,
             ring_buffer,
             resampling_quality,
+            device_channels: capture_channels,
+            channel_mix: Arc::new(channel_mix),
         };
 
         // Start the stream immediately
@@ -513,6 +554,8 @@ impl AudioRecorder {
     /// Start the audio stream (internal).
     fn start_stream(&mut self) -> Result<(), AudioRecorderError> {
         let ring_buffer = self.ring_buffer.clone();
+        let channel_mix = self.channel_mix.clone();
+        let device_channels = self.device_channels;
         let err_fn = |err| error!("Audio stream error: {}", err);
 
         let stream = self
@@ -520,7 +563,15 @@ impl AudioRecorder {
             .build_input_stream(
                 &self.config,
                 move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                    ring_buffer.push_samples(data);
+                    // Mix multi-channel audio to mono based on channel selection
+                    let mono_data = if device_channels == 1 {
+                        // Already mono, just pass through
+                        data.to_vec()
+                    } else {
+                        // Mix selected channels to mono
+                        mix_channels_to_mono(data, device_channels as usize, &channel_mix)
+                    };
+                    ring_buffer.push_samples(&mono_data);
                 },
                 err_fn,
                 None,
@@ -698,14 +749,25 @@ impl AudioRecorder {
             .map_err(|e| AudioRecorderError::NoInputConfig(e.to_string()))?;
 
         let device_sample_rate = supported_config.sample_rate();
+        let device_channels = supported_config.channels();
+
+        // Determine if we need multi-channel capture based on current mix setting
+        let use_multi_channel =
+            matches!(self.channel_mix.as_ref(), ChannelMix::Select(chs) if !chs.is_empty());
+        let capture_channels = if use_multi_channel {
+            device_channels
+        } else {
+            1
+        };
+
         info!(
-            "Device sample rate: {} Hz (will resample to {} Hz)",
-            device_sample_rate, SAMPLE_RATE
+            "Device: {} Hz, {} channels (capturing {} ch)",
+            device_sample_rate, device_channels, capture_channels
         );
 
         // Build new config
         let config = StreamConfig {
-            channels: 1,
+            channels: capture_channels,
             sample_rate: device_sample_rate,
             buffer_size: cpal::BufferSize::Default,
         };
@@ -714,6 +776,7 @@ impl AudioRecorder {
         self.device = device;
         self.config = config;
         self.device_sample_rate = device_sample_rate;
+        self.device_channels = capture_channels;
 
         // Get prebuffer duration from existing ring buffer
         let prebuffer_secs = self.ring_buffer.duration_secs();
@@ -742,6 +805,52 @@ pub fn default_device_name() -> Option<String> {
     let host = cpal::default_host();
     host.default_input_device()
         .and_then(|d| d.description().ok().map(|desc| desc.name().to_string()))
+}
+
+/// Mix multi-channel audio to mono based on channel selection.
+///
+/// # Arguments
+/// * `data` - Interleaved multi-channel audio samples
+/// * `channels` - Number of channels in the input data
+/// * `mix` - Which channels to include in the mix
+fn mix_channels_to_mono(data: &[f32], channels: usize, mix: &ChannelMix) -> Vec<f32> {
+    if channels == 0 || data.is_empty() {
+        return Vec::new();
+    }
+
+    let num_frames = data.len() / channels;
+    let mut mono = Vec::with_capacity(num_frames);
+
+    match mix {
+        ChannelMix::All => {
+            // Average all channels
+            for frame in data.chunks_exact(channels) {
+                let sum: f32 = frame.iter().sum();
+                mono.push(sum / channels as f32);
+            }
+        }
+        ChannelMix::Select(selected) => {
+            if selected.is_empty() {
+                // No channels selected - return silence
+                return vec![0.0; num_frames];
+            }
+
+            // Average only selected channels
+            for frame in data.chunks_exact(channels) {
+                let mut sum = 0.0f32;
+                let mut count = 0;
+                for &ch in selected {
+                    if (ch as usize) < channels {
+                        sum += frame[ch as usize];
+                        count += 1;
+                    }
+                }
+                mono.push(if count > 0 { sum / count as f32 } else { 0.0 });
+            }
+        }
+    }
+
+    mono
 }
 
 /// Resample audio using the specified quality setting

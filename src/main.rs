@@ -555,9 +555,8 @@ async fn main() -> anyhow::Result<()> {
                         return Ok(());
                     }
 
-                    WakeWordDetector::remove_models().map_err(|e| {
-                        anyhow::anyhow!("Failed to remove wake word models: {}", e)
-                    })?;
+                    WakeWordDetector::remove_models()
+                        .map_err(|e| anyhow::anyhow!("Failed to remove wake word models: {}", e))?;
                     println!("Removed wake word models.");
                     return Ok(());
                 }

@@ -551,7 +551,17 @@ impl Daemon {
         // Initialize always-on audio recorder with ring buffer
         let prebuffer_secs = self.config.audio.prebuffer_duration_secs;
         let resampling_quality = self.config.audio.resampling_quality;
-        let audio_recorder = AudioRecorder::new_always_on(prebuffer_secs, resampling_quality)?;
+        let channel_mix = match &self.config.audio.channels {
+            crate::config::ChannelSelection::All => crate::input::ChannelMix::All,
+            crate::config::ChannelSelection::Select(channels) => {
+                crate::input::ChannelMix::Select(channels.clone())
+            }
+        };
+        let audio_recorder = AudioRecorder::new_always_on_with_channels(
+            prebuffer_secs,
+            resampling_quality,
+            channel_mix,
+        )?;
         info!(
             "Always-on audio capture initialized ({:.0}s ring buffer, {:?} resampling)",
             prebuffer_secs, resampling_quality

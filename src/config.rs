@@ -28,18 +28,13 @@ pub enum ConfigError {
 /// Channel selection for audio input.
 ///
 /// Specifies which channels to capture from multi-channel audio sources.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum ChannelSelection {
     /// Capture all channels and mix to mono (default)
+    #[default]
     All,
     /// Capture only the specified channels (0-indexed) and mix to mono
     Select(Vec<u8>),
-}
-
-impl Default for ChannelSelection {
-    fn default() -> Self {
-        Self::All
-    }
 }
 
 impl Serialize for ChannelSelection {
@@ -104,6 +99,7 @@ impl<'de> Deserialize<'de> for ChannelSelection {
     }
 }
 
+#[allow(dead_code)]
 impl ChannelSelection {
     /// Parse from a comma-separated string (for CLI)
     pub fn from_cli_arg(s: &str) -> Result<Self, String> {

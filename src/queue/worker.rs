@@ -208,6 +208,7 @@ mod tests {
             compression: crate::config::CompressionConfig::default(),
             limiter: crate::config::LimiterConfig::default(),
             noise_reduction: crate::config::NoiseReductionConfig::default(),
+            channels: crate::config::ChannelSelection::default(),
         }
     }
 
@@ -234,6 +235,7 @@ mod tests {
                 release_ms: 50.0,
             },
             noise_reduction: crate::config::NoiseReductionConfig::default(),
+            channels: crate::config::ChannelSelection::default(),
         }
     }
 

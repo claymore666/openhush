@@ -2,9 +2,13 @@
 //!
 //! - Preferences window for configuration
 //! - First-run onboarding wizard
+//! - Audio channel selector
 
+mod channel_selector;
 mod wizard;
 
+#[allow(unused_imports)]
+pub use channel_selector::{run_channel_selector, spawn_channel_selector};
 pub use wizard::{is_first_run, run_wizard};
 
 use crate::config::{Config, Theme};
@@ -268,6 +272,25 @@ impl PreferencesApp {
     }
 
     fn show_audio_tab(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Input Channels");
+        ui.add_space(10.0);
+
+        ui.horizontal(|ui| {
+            if ui.button("🎚️ Select Audio Channels...").clicked() {
+                // Build current selections from config
+                let current_selections = self.build_channel_selections();
+
+                // Run the channel selector
+                if let Some(selections) = run_channel_selector(&current_selections) {
+                    self.apply_channel_selections(&selections);
+                    self.unsaved_changes = true;
+                }
+            }
+            ui.label("Configure which audio inputs and channels to use");
+        });
+
+        ui.add_space(15.0);
+
         ui.heading("Audio Preprocessing");
         ui.add_space(10.0);
 
@@ -482,6 +505,35 @@ impl PreferencesApp {
             ui.label("Current theme:");
             ui.strong(effective);
         });
+    }
+
+    fn build_channel_selections(&self) -> Vec<crate::input::DeviceChannelSelection> {
+        // Build DeviceChannelSelection from current config
+        // For now, return empty - the channel selector will enumerate fresh devices
+        Vec::new()
+    }
+
+    fn apply_channel_selections(&mut self, selections: &[crate::input::DeviceChannelSelection]) {
+        use crate::config::ChannelSelection;
+
+        // For now, store the first enabled device's channels in config
+        // TODO: support multiple devices in config
+        if let Some(sel) = selections
+            .iter()
+            .find(|s| s.enabled && !s.selected_channels.is_empty())
+        {
+            self.config.audio.channels = ChannelSelection::Select(sel.selected_channels.clone());
+            // Update the input field
+            self.channels_input = sel
+                .selected_channels
+                .iter()
+                .map(|c| c.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+        } else {
+            self.config.audio.channels = ChannelSelection::All;
+            self.channels_input = "all".to_string();
+        }
     }
 
     fn show_advanced_tab(&mut self, ui: &mut egui::Ui) {
