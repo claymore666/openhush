@@ -1,70 +1,120 @@
 # OpenHush
 
-> Open-source voice-to-text that acts as a seamless whisper keyboard.
+> Local voice-to-text that just works—with the power to do more when you're ready.
 
-Press a hotkey, speak, release — your words appear where your cursor is. Powered by local AI, no cloud required.
+Press a hotkey, speak, release — your words appear where your cursor is.
 
-## Why OpenHush?
+**100% local. Your voice never leaves your device.**
 
-- **Privacy first** — Your voice never leaves your computer. No cloud, no subscriptions, no data collection.
-- **Works everywhere** — Type into any application: emails, documents, chat, code editors, terminals.
-- **Fast** — GPU acceleration gives you results in under a second for most dictation.
-- **Accurate** — Uses OpenAI's Whisper models, the same tech behind ChatGPT's voice features.
-- **Free forever** — Open source, MIT licensed. No trials, no premium tiers.
+## Privacy First
+
+OpenHush processes everything on your machine:
+
+- **No cloud** — Transcription runs locally using Whisper AI
+- **No account** — No sign-up, no login, no tracking
+- **No network** — Works fully offline after initial model download
+- **No data collection** — We can't see your voice data because it never leaves your computer
+- **Secure secrets** — API keys stored in your system's keyring, never in plain text
+
+Your voice is yours. Period.
+
+## Quick Start
+
+```bash
+# Install and run the wizard
+openhush wizard
+```
+
+The wizard will:
+1. Download the right model for your hardware
+2. Configure your hotkey
+3. Test your microphone
+4. Start the daemon
+
+**That's it.** Hold Right Ctrl and speak.
+
+Or if you prefer manual setup:
+```bash
+openhush model download small   # Download a model
+openhush start                  # Start the daemon
+```
+
+## Capture Anything
+
+OpenHush supports multiple audio sources:
+
+| Input | Description |
+|-------|-------------|
+| **Microphone** | Any USB, built-in, or Bluetooth mic |
+| **System Audio** | Transcribe meetings, calls, videos, podcasts playing on your machine |
+| **Multi-Channel** | Select specific channels from pro audio interfaces |
+| **Wake Word** | "Hey Computer" for hands-free activation—no hotkey needed |
+
+Mix and match. Capture your mic AND system audio together for meeting transcription with your own comments.
+
+## Output Anywhere
+
+Route your transcriptions wherever you need them:
+
+| Destination | What It Does |
+|-------------|--------------|
+| **Cursor** | Paste directly into any application |
+| **Clipboard** | Copy for manual paste |
+| **File** | Save transcripts to disk (text, JSON, SRT) |
+| **Translation** | Speak in any language, get English text |
+| **LLM Correction** | Grammar, punctuation, filler word removal via Ollama or OpenAI |
+| **Meeting Summaries** | AI-generated summaries of long recordings |
+| **Custom Hooks** | Trigger any script—send to Notion, commit to git, post to Slack |
+| **REST API** | Integrate with external tools, Stream Deck, Home Assistant |
+
+### Output Pipeline Example
+
+```
+Voice → Noise Reduction → Whisper → LLM Cleanup → Save to File + Paste at Cursor
+```
+
+You control every step.
 
 ## Features
 
-### Core Dictation
-- **Push-to-talk** — Hold your hotkey, speak, release. Text appears at your cursor.
-- **Toggle mode** — Press once to start recording, press again to stop.
-- **Auto-paste** — Transcribed text is typed automatically, or copied to clipboard.
-- **Translation** — Speak in any language, get English text (great for multilingual users).
-- **System audio capture** — Transcribe meetings, calls, or any desktop audio (Linux with PulseAudio/PipeWire).
+### Easy Mode (Works Out of the Box)
+- **Push-to-talk** — Hold hotkey, speak, release
+- **Toggle mode** — Press once to start, again to stop
+- **Auto-paste** — Text appears at your cursor automatically
+- **System tray** — Runs quietly in the background
+- **Preferences GUI** — Point-and-click settings
 
-### Smart Processing
-- **Continuous dictation** — Keep talking naturally; OpenHush detects pauses and transcribes automatically.
-- **Wake word activation** — Say "Hey OpenHush" for hands-free recording (no hotkey needed).
-- **Noise reduction** — AI-powered background noise removal (keyboard, fans, traffic).
-- **Filler word cleanup** — Removes "um", "uh", "like", "you know" from your speech.
-- **Custom vocabulary** — Add names, jargon, or terms that Whisper gets wrong.
-- **Text snippets** — Expand abbreviations (e.g., "sig" → your email signature).
-- **Post-transcription actions** — Run shell commands, send HTTP requests, or log to files after transcription.
-- **App-aware profiles** — Different settings per application (e.g., aggressive filler removal in email, conservative in code editors).
+### Power Mode (When You Need More)
+- **Continuous dictation** — Voice Activity Detection for natural pausing
+- **Streaming transcription** — See words appear as you speak
+- **Noise reduction** — RNNoise AI filters background noise in real-time
+- **Filler word removal** — Strips "um", "uh", "like" automatically
+- **Custom vocabulary** — Boost recognition for names, jargon, technical terms
+- **Text snippets** — Expand abbreviations (e.g., "sig" → your email signature)
+- **Post-transcription hooks** — Run shell commands after each transcription
+- **REST API + Swagger UI** — Full remote control and automation
+- **D-Bus integration** — Desktop integration on Linux
 
-### Quality Options
-- **Instant mode** — Fastest response, good for quick notes and chat.
-- **Balanced mode** — Best of both worlds (default).
-- **Quality mode** — Most accurate, for important documents.
-
-### User Experience
-- **System tray** — Runs quietly in the background with status indicator.
-- **Preferences GUI** — Point-and-click settings, no config files needed.
-- **Dark mode** — Follows your system theme (or choose manually).
-- **Crash recovery** — If something goes wrong, diagnostic reports help fix it.
-
-### Security
-- **Sandboxing** — AppArmor, SELinux, and Firejail profiles included.
-- **Secure secrets** — API keys stored in platform keyring (Keychain, Credential Manager, Secret Service).
-- **Minimal permissions** — Only accesses microphone, config, and models.
-- **No network** — Works fully offline (optional Ollama connection).
+### Quality Presets
+| Preset | Model | Best For |
+|--------|-------|----------|
+| **Instant** | small | Quick notes, chat |
+| **Balanced** | medium | Everyday dictation |
+| **Quality** | large-v3 | Important documents |
 
 ## Installation
 
-### Arch Linux (AUR)
+### Quick Install (Recommended)
 
 ```bash
-# Using yay
+# Arch Linux (AUR)
 yay -S openhush
 
-# Or for latest development version
-yay -S openhush-git
-```
-
-### Flatpak
-
-```bash
-# Coming soon to Flathub
+# Flatpak (coming soon)
 flatpak install flathub org.openhush.OpenHush
+
+# Homebrew (macOS)
+brew install openhush
 ```
 
 ### From Source
@@ -76,29 +126,17 @@ cargo build --release --features cuda  # or: hipblas, metal, vulkan
 sudo cp target/release/openhush /usr/local/bin/
 ```
 
-See [Building from Source](#building-from-source) for detailed instructions.
-
-## Quick Start
-
-```bash
-# Download a model (first time only)
-openhush model download small
-
-# Start the daemon
-openhush start
-
-# That's it! Hold Right Ctrl and speak.
-```
+See [Building from Source](#building-from-source) for GPU-specific instructions.
 
 ## Usage
 
-### Basic Commands
+### Everyday Commands
 
 ```bash
 openhush start              # Start in background
 openhush stop               # Stop the daemon
 openhush status             # Check if running
-openhush preferences        # Open settings window
+openhush preferences        # Open settings GUI
 ```
 
 ### Model Management
@@ -112,9 +150,9 @@ openhush model remove tiny          # Delete a model
 ### File Transcription
 
 ```bash
-openhush transcribe meeting.wav              # Transcribe a file
-openhush transcribe recording.mp3 -o json    # Output as JSON
-openhush transcribe --model large-v3 file.wav  # Use specific model
+openhush transcribe meeting.wav                    # Transcribe a file
+openhush transcribe recording.mp3 --output json    # Output as JSON
+openhush transcribe --summarize interview.wav      # Generate AI summary
 ```
 
 ### Configuration
@@ -126,55 +164,6 @@ openhush config --model large-v3    # Use most accurate model
 openhush config --language de       # Set language (or "auto")
 ```
 
-### Autostart Service
-
-```bash
-openhush service install            # Enable autostart on login
-openhush service uninstall          # Disable autostart
-openhush service status             # Check service status
-```
-
-Works on all platforms:
-- **Linux:** Creates systemd user service
-- **macOS:** Creates LaunchAgent
-- **Windows:** Adds to Registry Run key
-
-### D-Bus Control (Linux)
-
-```bash
-openhush recording start            # Start recording via D-Bus
-openhush recording stop             # Stop recording
-openhush recording toggle           # Toggle recording state
-openhush recording status           # Check recording status
-```
-
-### Running with Sandbox (Linux)
-
-```bash
-# Firejail (easiest)
-firejail openhush start
-
-# With AppArmor (auto-applies if profile installed)
-openhush start
-
-# Check sandbox status
-openhush status  # Shows "Running in AppArmor sandbox"
-```
-
-See [profiles/README.md](profiles/README.md) for installation instructions.
-
-## Choosing a Model
-
-| Model | Download | Speed | Best For |
-|-------|----------|-------|----------|
-| tiny | 75 MB | Instant | Quick notes, chat |
-| base | 142 MB | Very fast | Everyday use |
-| small | 466 MB | Fast | General dictation |
-| medium | 1.5 GB | Moderate | Professional use |
-| large-v3 | 3 GB | Slower | Maximum accuracy |
-
-**Recommendation:** Start with `small`. Upgrade to `medium` or `large-v3` if accuracy matters more than speed.
-
 ## System Requirements
 
 | Component | Minimum | Recommended |
@@ -185,55 +174,85 @@ See [profiles/README.md](profiles/README.md) for installation instructions.
 
 ### GPU Acceleration
 
-GPU acceleration significantly speeds up transcription. OpenHush supports multiple GPU backends:
-
-| GPU | Feature | Platform | Requirements |
-|-----|---------|----------|--------------|
-| NVIDIA | `cuda` | Linux, Windows | CUDA Toolkit 11.x+ |
-| AMD | `hipblas` | Linux | ROCm 5.x+ |
-| Apple Silicon | `metal` | macOS | Built-in (M1/M2/M3) |
-| Any | `vulkan` | All | Vulkan SDK |
-
-Build with your GPU's feature flag (see [Building from Source](#building-from-source)).
+| GPU | Feature | Platform |
+|-----|---------|----------|
+| NVIDIA | `cuda` | Linux, Windows |
+| AMD | `hipblas` | Linux |
+| Apple Silicon | `metal` | macOS |
+| Any | `vulkan` | All platforms |
 
 ## Platform Support
 
 | Platform | Status | Notes |
 |----------|--------|-------|
-| Linux (X11) | ✅ Full | Ubuntu, Fedora, Debian, etc. |
-| Linux (Wayland) | ✅ Full | KDE Plasma, GNOME, Sway |
-| Linux (TTY) | ✅ Full | Terminal-only mode |
-| macOS | ✅ Full | Intel & Apple Silicon |
-| Windows | ✅ Full | Windows 10/11 |
+| Linux (X11) | Full | Primary development platform |
+| Linux (Wayland) | Full | KDE Plasma, GNOME, Sway |
+| Linux (TTY) | Full | Terminal-only mode |
+| macOS | Full | Intel & Apple Silicon |
+| Windows | Full | Windows 10/11 |
 
-## Configuration File
+## Configuration
 
-Settings are stored in `~/.config/openhush/config.toml`:
+Settings live in `~/.config/openhush/config.toml`:
 
 ```toml
 [hotkey]
-key = "ControlRight"      # Try: F12, AltRight, etc.
-mode = "push_to_talk"     # or "toggle"
+key = "ControlRight"
+mode = "push_to_talk"       # or "toggle", "continuous"
 
 [transcription]
-preset = "balanced"       # instant, balanced, quality
-language = "auto"         # or "en", "de", "es", etc.
-translate = false         # true = always output English
+preset = "balanced"         # instant, balanced, quality
+language = "auto"           # or "en", "de", "es", etc.
+translate = false           # true = always output English
+
+[audio]
+channels = "all"            # or [0, 1] for specific channels
 
 [output]
-clipboard = true          # Copy to clipboard
-paste = true              # Auto-type at cursor
-
-[feedback]
-audio = true              # Beep when recording starts/stops
-visual = true             # Desktop notifications
-
-[appearance]
-theme = "auto"            # auto, light, dark
+clipboard = true
+paste = true
 
 [correction]
-enabled = false           # Enable LLM post-processing
-remove_fillers = false    # Remove um, uh, like
+enabled = true              # LLM post-processing
+remove_fillers = true       # Remove um, uh, like
+ollama_url = "http://localhost:11434"
+ollama_model = "llama3.2"
+
+[wake_word]
+enabled = false
+phrase = "hey computer"
+
+[appearance]
+theme = "auto"              # auto, light, dark
+```
+
+## Building from Source
+
+```bash
+git clone https://github.com/claymore666/openhush.git
+cd openhush
+
+# CPU only
+cargo build --release
+
+# With GPU acceleration
+cargo build --release --features cuda      # NVIDIA
+cargo build --release --features hipblas   # AMD
+cargo build --release --features metal     # Apple Silicon
+cargo build --release --features vulkan    # Cross-platform
+```
+
+### Linux Dependencies
+
+```bash
+# Debian/Ubuntu
+sudo apt install libasound2-dev libdbus-1-dev libpulse-dev pkg-config
+
+# Fedora
+sudo dnf install alsa-lib-devel dbus-devel pulseaudio-libs-devel
+
+# Arch
+sudo pacman -S alsa-lib dbus libpulse
 ```
 
 ## Troubleshooting
@@ -246,79 +265,24 @@ openhush start -f -v      # Run in foreground with verbose logs
 
 ### Transcription is slow
 - Try a smaller model: `openhush config --model small`
-- Make sure CUDA is working: check `nvidia-smi`
-
-### Text appears in wrong place
-- Some Wayland apps need `wtype` installed
-- Some X11 apps need `xdotool` installed
+- Verify GPU is working: `nvidia-smi` or check logs
 
 ### Where are the logs?
 - Main log: `~/.local/share/openhush/openhush.log`
 - Crash reports: `~/.local/share/openhush/crash.log`
 
-## Building from Source
-
-```bash
-git clone https://github.com/claymore666/openhush.git
-cd openhush
-
-# CPU only (no GPU acceleration)
-cargo build --release
-
-# NVIDIA GPU (CUDA)
-cargo build --release --features cuda
-
-# AMD GPU (ROCm/HIP)
-cargo build --release --features hipblas
-
-# Apple Silicon (Metal)
-cargo build --release --features metal
-
-# Cross-platform (Vulkan)
-cargo build --release --features vulkan
-```
-
-**Note:** Only one GPU feature can be enabled at compile time. Choose the one matching your hardware.
-
-### Linux Dependencies
-
-```bash
-# Debian/Ubuntu
-sudo apt install libasound2-dev libdbus-1-dev pkg-config
-
-# Fedora
-sudo dnf install alsa-lib-devel dbus-devel
-
-# Arch
-sudo pacman -S alsa-lib dbus
-```
-
 ## Documentation
 
-For detailed documentation, visit the **[OpenHush Wiki](https://github.com/claymore666/openhush/wiki)**:
+Visit the **[OpenHush Wiki](https://github.com/claymore666/openhush/wiki)** for:
 
-- [Architecture](https://github.com/claymore666/openhush/wiki/Architecture) — System overview and data flow
-- [Components](https://github.com/claymore666/openhush/wiki/Components) — Module documentation
-- [Product Vision](https://github.com/claymore666/openhush/wiki/Product-Vision) — Roadmap and future plans
-- [User Guide](https://github.com/claymore666/openhush/wiki/User-Guide) — Detailed usage instructions
-
-## Roadmap
-
-### Coming Soon
-- Plugin system for community extensions
-
-### Packaging Status
-- ✅ AUR (Arch User Repository)
-- ✅ Flatpak (ready, pending Flathub submission)
-- ✅ Homebrew (macOS)
-- ✅ DMG installer (macOS)
-- ✅ MSI installer (Windows)
-
-See the [GitHub milestones](https://github.com/claymore666/openhush/milestones) for detailed plans.
+- [User Guide](https://github.com/claymore666/openhush/wiki/User-Guide) — Detailed usage
+- [Architecture](https://github.com/claymore666/openhush/wiki/Architecture) — System design
+- [REST API](https://github.com/claymore666/openhush/wiki/REST-API) — API reference
+- [Hooks & Automation](https://github.com/claymore666/openhush/wiki/Hooks) — Scripting guide
 
 ## Contributing
 
-Contributions welcome! Please read our contributing guidelines before submitting PRs.
+Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## License
 
