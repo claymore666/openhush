@@ -546,9 +546,25 @@ async fn main() -> anyhow::Result<()> {
             ModelAction::Remove { name } => {
                 use engine::whisper::{remove_model, WhisperModel};
 
+                // Handle wake-word model removal separately
+                if name == "wake-word" {
+                    use input::wake_word::WakeWordDetector;
+
+                    if !WakeWordDetector::models_available() {
+                        println!("Wake word models are not installed.");
+                        return Ok(());
+                    }
+
+                    WakeWordDetector::remove_models().map_err(|e| {
+                        anyhow::anyhow!("Failed to remove wake word models: {}", e)
+                    })?;
+                    println!("Removed wake word models.");
+                    return Ok(());
+                }
+
                 let model: WhisperModel = name.parse().map_err(|()| {
                     anyhow::anyhow!(
-                        "Unknown model '{}'. Available: tiny, base, small, medium, large-v3",
+                        "Unknown model '{}'. Available: tiny, base, small, medium, large-v3, wake-word",
                         name
                     )
                 })?;

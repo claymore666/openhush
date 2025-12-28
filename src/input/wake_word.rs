@@ -202,6 +202,36 @@ impl WakeWordDetector {
         Ok(())
     }
 
+    /// Remove wake word models from disk
+    pub fn remove_models() -> Result<(), WakeWordError> {
+        let models_dir = Self::models_dir()?;
+
+        let models = [MELSPEC_MODEL, EMBEDDING_MODEL, WAKE_WORD_MODEL];
+        let mut removed = 0;
+
+        for name in models {
+            let path = models_dir.join(name);
+            if path.exists() {
+                std::fs::remove_file(&path)?;
+                info!("Removed {}", name);
+                removed += 1;
+            }
+        }
+
+        // Try to remove the directory if empty
+        if models_dir.exists() {
+            let _ = std::fs::remove_dir(&models_dir);
+        }
+
+        if removed == 0 {
+            info!("No wake word models to remove");
+        } else {
+            info!("Removed {} wake word model(s)", removed);
+        }
+
+        Ok(())
+    }
+
     async fn download_file(url: &str, path: &Path) -> Result<(), WakeWordError> {
         use futures_util::StreamExt;
         use std::io::Write;
