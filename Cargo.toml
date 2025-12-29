@@ -74,7 +74,7 @@ anyhow = "1"
 chrono = "0.4"
 
 # System theme detection (dark mode)
-dark-light = "1.1"
+dark-light = "2.0"
 
 # Platform paths (XDG on Linux, native elsewhere)
 directories = "5"
