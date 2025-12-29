@@ -147,7 +147,7 @@ jobs:
           ORT_DYLIB_PATH: /home/runner/.local/lib/onnxruntime/lib/libonnxruntime.so
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
           files: cobertura.xml
           fail_ci_if_error: false
