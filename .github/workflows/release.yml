@@ -153,7 +153,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download Linux artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: openhush-linux-x86_64
           path: artifact
@@ -237,7 +237,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download macOS artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           pattern: openhush-macos-*
           path: artifacts
@@ -325,7 +325,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download Windows artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: openhush-windows-x86_64
           path: artifact
@@ -381,7 +381,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: artifacts
           merge-multiple: false
