@@ -8,7 +8,10 @@
 //! 5. Outputs text to clipboard and/or pastes at cursor (in order)
 
 use crate::api::{self, ApiCommand, ApiState};
-use crate::config::{Config, CorrectionConfig, VocabularyConfig};
+use crate::config::{
+    Config, CorrectionConfig, TranslationConfig, TranslationEngine as TranslationEngineType,
+    VocabularyConfig,
+};
 use crate::correction::TextCorrector;
 #[cfg(target_os = "linux")]
 use crate::dbus::{DaemonCommand, DaemonStatus, DbusService};
@@ -25,6 +28,7 @@ use crate::queue::{
     worker::spawn_worker, TranscriptionJob, TranscriptionResult, TranscriptionTracker,
     WorkerCommand,
 };
+use crate::translation::{OllamaTranslator, TranslationEngine};
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 use crate::tray::{TrayEvent, TrayManager};
 use crate::vad::VadConfig;
@@ -143,6 +147,45 @@ async fn init_corrector(config: &CorrectionConfig) -> Option<Arc<TextCorrector>>
     }
 }
 
+/// Initialize translator if enabled.
+async fn init_translator(config: &TranslationConfig) -> Option<Arc<OllamaTranslator>> {
+    if !config.enabled {
+        return None;
+    }
+
+    // For now, only Ollama is implemented
+    // M2M-100 will be added later
+    match config.engine {
+        TranslationEngineType::Ollama => {
+            let translator = Arc::new(OllamaTranslator::new(
+                &config.ollama_url,
+                &config.ollama_model,
+                config.timeout_secs,
+            ));
+
+            if translator.is_available().await {
+                info!(
+                    "Translation enabled (engine: ollama, model: {}, target: {})",
+                    config.ollama_model, config.target_language
+                );
+                Some(translator)
+            } else {
+                warn!(
+                    "Ollama not available at {}. Continuing without translation.",
+                    config.ollama_url
+                );
+                None
+            }
+        }
+        TranslationEngineType::M2m100 => {
+            warn!(
+                "M2M-100 translation engine not yet implemented. Use engine = \"ollama\" instead."
+            );
+            None
+        }
+    }
+}
+
 // ============================================================================
 // Output Processing
 // ============================================================================
@@ -194,13 +237,16 @@ impl BackpressureConfig {
 
 /// Process and output a transcription result.
 ///
-/// Applies vocabulary replacements, LLM correction, outputs the text,
+/// Applies vocabulary replacements, LLM correction, translation, outputs the text,
 /// and runs post-transcription actions.
+#[allow(clippy::too_many_arguments)]
 async fn process_and_output(
     result: TranscriptionResult,
     chunk_separator: &str,
     vocabulary_manager: &Option<Arc<VocabularyManager>>,
     text_corrector: &Option<Arc<TextCorrector>>,
+    translator: &Option<Arc<OllamaTranslator>>,
+    translation_config: &TranslationConfig,
     output_handler: &OutputHandler,
     action_runner: &ActionRunner,
     model_name: &str,
@@ -229,6 +275,33 @@ async fn process_and_output(
         match corrector.correct(&text).await {
             Ok(corrected) => text = corrected,
             Err(e) => warn!("LLM correction failed: {}", e),
+        }
+    }
+
+    // Apply translation
+    if let Some(ref trans) = translator {
+        // Detect source language from transcription config or use "auto"
+        // For now, assume the transcribed language is known
+        let source_lang = "auto"; // Could be improved to use detected language
+        let target_lang = &translation_config.target_language;
+
+        match trans.translate(&text, source_lang, target_lang).await {
+            Ok(translated) => {
+                if translation_config.preserve_original {
+                    // Output both original and translated
+                    text = format!(
+                        "[{}] {}\n[{}] {}",
+                        source_lang.to_uppercase(),
+                        text,
+                        target_lang.to_uppercase(),
+                        translated
+                    );
+                } else {
+                    text = translated;
+                }
+                debug!("Translation applied: {} -> {}", source_lang, target_lang);
+            }
+            Err(e) => warn!("Translation failed: {}", e),
         }
     }
 
@@ -670,6 +743,10 @@ impl Daemon {
 
         // Initialize text corrector if enabled
         let text_corrector = init_corrector(&self.config.correction).await;
+
+        // Initialize translator if enabled
+        let translator = init_translator(&self.config.translation).await;
+        let translation_config = self.config.translation.clone();
 
         // Create transcription command and result channels
         let (command_tx, command_rx) = mpsc::channel::<WorkerCommand>(CHANNEL_BUFFER_SIZE);
@@ -1271,6 +1348,8 @@ impl Daemon {
                                         &chunk_separator,
                                         &vocabulary_manager,
                                         &text_corrector,
+                                        &translator,
+                                        &translation_config,
                                         &output_handler,
                                         &action_runner,
                                         &effective_model,
@@ -1305,6 +1384,8 @@ impl Daemon {
                                 &chunk_separator,
                                 &vocabulary_manager,
                                 &text_corrector,
+                                &translator,
+                                &translation_config,
                                 &output_handler,
                                 &action_runner,
                                 &effective_model,

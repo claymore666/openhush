@@ -28,6 +28,7 @@ mod secrets;
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 mod service;
 mod summarization;
+mod translation;
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 mod tray;
 mod vad;

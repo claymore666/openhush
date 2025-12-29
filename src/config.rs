@@ -146,6 +146,10 @@ pub struct Config {
     #[serde(default)]
     pub correction: CorrectionConfig,
 
+    /// Translation settings for multilingual output
+    #[serde(default)]
+    pub translation: TranslationConfig,
+
     #[serde(default)]
     pub feedback: FeedbackConfig,
 
@@ -737,6 +741,84 @@ pub enum FillerRemovalMode {
 
 fn default_ollama_timeout() -> u32 {
     30 // seconds
+}
+
+/// Translation engine type
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TranslationEngine {
+    /// M2M-100 neural translation (local, high quality)
+    #[default]
+    M2m100,
+    /// Ollama LLM-based translation (local, flexible)
+    Ollama,
+}
+
+/// Translation configuration
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct TranslationConfig {
+    /// Enable translation of transcriptions
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Translation engine to use
+    #[serde(default)]
+    pub engine: TranslationEngine,
+
+    /// Target language code (e.g., "en", "de", "fr")
+    #[serde(default = "default_target_language")]
+    pub target_language: String,
+
+    /// Preserve original text alongside translation
+    #[serde(default)]
+    pub preserve_original: bool,
+
+    /// M2M-100 model variant: "418m" (small) or "1.2b" (large)
+    #[serde(default = "default_m2m100_model")]
+    pub m2m100_model: String,
+
+    /// Ollama API endpoint (if engine = ollama)
+    #[serde(default = "default_ollama_url")]
+    pub ollama_url: String,
+
+    /// Ollama model for translation (if engine = ollama)
+    #[serde(default = "default_translation_ollama_model")]
+    pub ollama_model: String,
+
+    /// Timeout for translation requests in seconds
+    #[serde(default = "default_translation_timeout")]
+    pub timeout_secs: u32,
+}
+
+impl Default for TranslationConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            engine: TranslationEngine::default(),
+            target_language: default_target_language(),
+            preserve_original: false,
+            m2m100_model: default_m2m100_model(),
+            ollama_url: default_ollama_url(),
+            ollama_model: default_translation_ollama_model(),
+            timeout_secs: default_translation_timeout(),
+        }
+    }
+}
+
+fn default_target_language() -> String {
+    "en".to_string()
+}
+
+fn default_m2m100_model() -> String {
+    "418m".to_string()
+}
+
+fn default_translation_ollama_model() -> String {
+    "llama3.2:3b".to_string()
+}
+
+fn default_translation_timeout() -> u32 {
+    60 // seconds - translation can take longer than correction
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -1793,5 +1875,129 @@ theme = "auto"
     fn test_appearance_config_default() {
         let config = AppearanceConfig::default();
         assert_eq!(config.theme, Theme::Auto);
+    }
+
+    // ===================
+    // ChannelSelection Tests
+    // ===================
+
+    #[test]
+    fn test_channel_selection_default() {
+        assert_eq!(ChannelSelection::default(), ChannelSelection::All);
+    }
+
+    #[test]
+    fn test_channel_selection_serialize_all() {
+        let sel = ChannelSelection::All;
+        let json = serde_json::to_string(&sel).unwrap();
+        assert_eq!(json, "\"all\"");
+    }
+
+    #[test]
+    fn test_channel_selection_serialize_select() {
+        let sel = ChannelSelection::Select(vec![0, 2, 4]);
+        let json = serde_json::to_string(&sel).unwrap();
+        assert_eq!(json, "[0,2,4]");
+    }
+
+    #[test]
+    fn test_channel_selection_deserialize_all_string() {
+        let sel: ChannelSelection = serde_json::from_str("\"all\"").unwrap();
+        assert_eq!(sel, ChannelSelection::All);
+    }
+
+    #[test]
+    fn test_channel_selection_deserialize_all_uppercase() {
+        let sel: ChannelSelection = serde_json::from_str("\"ALL\"").unwrap();
+        assert_eq!(sel, ChannelSelection::All);
+    }
+
+    #[test]
+    fn test_channel_selection_deserialize_array() {
+        let sel: ChannelSelection = serde_json::from_str("[1, 3, 5]").unwrap();
+        assert_eq!(sel, ChannelSelection::Select(vec![1, 3, 5]));
+    }
+
+    #[test]
+    fn test_channel_selection_deserialize_empty_array() {
+        let sel: ChannelSelection = serde_json::from_str("[]").unwrap();
+        assert_eq!(sel, ChannelSelection::All); // Empty array becomes All
+    }
+
+    #[test]
+    fn test_channel_selection_from_cli_arg_all() {
+        let sel = ChannelSelection::from_cli_arg("all").unwrap();
+        assert_eq!(sel, ChannelSelection::All);
+    }
+
+    #[test]
+    fn test_channel_selection_from_cli_arg_all_uppercase() {
+        let sel = ChannelSelection::from_cli_arg("ALL").unwrap();
+        assert_eq!(sel, ChannelSelection::All);
+    }
+
+    #[test]
+    fn test_channel_selection_from_cli_arg_empty() {
+        let sel = ChannelSelection::from_cli_arg("").unwrap();
+        assert_eq!(sel, ChannelSelection::All);
+    }
+
+    #[test]
+    fn test_channel_selection_from_cli_arg_channels() {
+        let sel = ChannelSelection::from_cli_arg("0,1,2").unwrap();
+        assert_eq!(sel, ChannelSelection::Select(vec![0, 1, 2]));
+    }
+
+    #[test]
+    fn test_channel_selection_from_cli_arg_with_spaces() {
+        let sel = ChannelSelection::from_cli_arg("0, 1, 2").unwrap();
+        assert_eq!(sel, ChannelSelection::Select(vec![0, 1, 2]));
+    }
+
+    #[test]
+    fn test_channel_selection_from_cli_arg_invalid() {
+        let result = ChannelSelection::from_cli_arg("0,abc,2");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("abc"));
+    }
+
+    #[test]
+    fn test_channel_selection_indices_all() {
+        let sel = ChannelSelection::All;
+        assert_eq!(sel.indices(), None);
+    }
+
+    #[test]
+    fn test_channel_selection_indices_select() {
+        let sel = ChannelSelection::Select(vec![0, 2]);
+        assert_eq!(sel.indices(), Some(&[0, 2][..]));
+    }
+
+    #[test]
+    fn test_channel_selection_toml_all() {
+        let toml_str = r#"
+[audio]
+channels = "all"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.audio.channels, ChannelSelection::All);
+    }
+
+    #[test]
+    fn test_channel_selection_toml_select() {
+        let toml_str = r#"
+[audio]
+channels = [0, 1]
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.audio.channels, ChannelSelection::Select(vec![0, 1]));
+    }
+
+    #[test]
+    fn test_channel_selection_roundtrip() {
+        let original = ChannelSelection::Select(vec![1, 3, 5]);
+        let json = serde_json::to_string(&original).unwrap();
+        let parsed: ChannelSelection = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, parsed);
     }
 }

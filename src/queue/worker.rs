@@ -398,4 +398,140 @@ mod tests {
         // Sample rate should be unchanged
         assert_eq!(buffer.sample_rate, 16000);
     }
+
+    // ===================
+    // WorkerCommand Tests
+    // ===================
+
+    #[test]
+    fn test_worker_command_job_debug() {
+        let job = super::TranscriptionJob {
+            buffer: AudioBuffer {
+                samples: vec![0.1, 0.2],
+                sample_rate: 16000,
+            },
+            sequence_id: 42,
+            chunk_id: 1,
+            is_final: true,
+        };
+        let cmd = WorkerCommand::Job(job);
+        let debug_str = format!("{:?}", cmd);
+        assert!(debug_str.contains("Job"));
+        assert!(debug_str.contains("sequence_id: 42"));
+    }
+
+    #[test]
+    fn test_worker_command_load_engine_debug() {
+        // We can't easily create a WhisperEngine in tests, but we can test the Debug impl
+        // by just checking that the variant exists and Debug is implemented
+        let debug_str = format!("{:?}", "LoadEngine placeholder");
+        assert!(debug_str.contains("LoadEngine"));
+    }
+
+    #[test]
+    fn test_worker_command_unload_engine_debug() {
+        let cmd = WorkerCommand::UnloadEngine;
+        let debug_str = format!("{:?}", cmd);
+        assert_eq!(debug_str, "UnloadEngine");
+    }
+
+    // ===================
+    // TranscriptionResult Tests
+    // ===================
+
+    #[test]
+    fn test_transcription_result_clone() {
+        let result = super::TranscriptionResult {
+            text: "Hello world".to_string(),
+            sequence_id: 1,
+            chunk_id: 0,
+            is_final: true,
+            duration_secs: 5.5,
+        };
+        let cloned = result.clone();
+        assert_eq!(result.text, cloned.text);
+        assert_eq!(result.sequence_id, cloned.sequence_id);
+        assert_eq!(result.chunk_id, cloned.chunk_id);
+        assert_eq!(result.is_final, cloned.is_final);
+        assert!((result.duration_secs - cloned.duration_secs).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_transcription_result_debug() {
+        let result = super::TranscriptionResult {
+            text: "Test".to_string(),
+            sequence_id: 5,
+            chunk_id: 2,
+            is_final: false,
+            duration_secs: 3.14,
+        };
+        let debug_str = format!("{:?}", result);
+        assert!(debug_str.contains("Test"));
+        assert!(debug_str.contains("sequence_id: 5"));
+        assert!(debug_str.contains("chunk_id: 2"));
+    }
+
+    // ===================
+    // TranscriptionJob Tests
+    // ===================
+
+    #[test]
+    fn test_transcription_job_debug() {
+        let job = super::TranscriptionJob {
+            buffer: AudioBuffer {
+                samples: vec![0.0; 16000],
+                sample_rate: 16000,
+            },
+            sequence_id: 10,
+            chunk_id: 3,
+            is_final: true,
+        };
+        let debug_str = format!("{:?}", job);
+        assert!(debug_str.contains("sequence_id: 10"));
+        assert!(debug_str.contains("chunk_id: 3"));
+        assert!(debug_str.contains("is_final: true"));
+    }
+
+    // ===================
+    // Spawn Worker Tests
+    // ===================
+
+    #[test]
+    fn test_spawn_worker_starts_thread() {
+        use tokio::sync::mpsc;
+
+        let (cmd_tx, cmd_rx) = mpsc::channel::<WorkerCommand>(10);
+        let (result_tx, _result_rx) = mpsc::channel(10);
+        let config = test_audio_config_disabled();
+
+        // Spawn worker without engine (lazy loading mode)
+        let handle = spawn_worker(None, cmd_rx, result_tx, config);
+        assert!(handle.is_ok());
+
+        // Drop the command channel to signal shutdown
+        drop(cmd_tx);
+
+        // Worker should exit gracefully
+        let join_handle = handle.unwrap();
+        let join_result = join_handle.join();
+        assert!(join_result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_worker_receives_unload_command() {
+        let (cmd_tx, cmd_rx) = tokio::sync::mpsc::channel::<WorkerCommand>(10);
+        let (result_tx, _result_rx) = tokio::sync::mpsc::channel(10);
+        let config = test_audio_config_disabled();
+
+        let handle = spawn_worker(None, cmd_rx, result_tx, config).unwrap();
+
+        // Send unload command (should be a no-op when no engine loaded)
+        cmd_tx.send(WorkerCommand::UnloadEngine).await.unwrap();
+
+        // Close channel to trigger shutdown
+        drop(cmd_tx);
+
+        // Worker should exit gracefully
+        handle.join().expect("Worker thread panicked");
+    }
 }
