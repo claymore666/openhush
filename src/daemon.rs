@@ -28,17 +28,25 @@ use crate::queue::{
     worker::spawn_worker, TranscriptionJob, TranscriptionResult, TranscriptionTracker,
     WorkerCommand,
 };
-use crate::translation::{OllamaTranslator, TranslationEngine};
+use crate::translation::{
+    download_m2m100_model, is_m2m100_downloaded, M2M100Model, OllamaTranslator, SentenceBuffer,
+    TranslationEngine,
+};
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 use crate::tray::{TrayEvent, TrayManager};
 use crate::vad::VadConfig;
 use crate::vad::{silero::SileroVad, VadEngine, VadError, VadState};
 use crate::vocabulary::{VocabularyError, VocabularyManager};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::{mpsc, RwLock};
 use tracing::{debug, error, info, warn};
+
+/// Global flag indicating a high-priority download is in progress.
+/// M2M-100 download waits for this to be false before starting.
+static WHISPER_DOWNLOADING: AtomicBool = AtomicBool::new(false);
 
 /// Channel buffer size for job and result queues
 const CHANNEL_BUFFER_SIZE: usize = 32;
@@ -148,13 +156,14 @@ async fn init_corrector(config: &CorrectionConfig) -> Option<Arc<TextCorrector>>
 }
 
 /// Initialize translator if enabled.
+///
+/// For M2M-100: If model not downloaded, spawns background download and returns
+/// Ollama as fallback translator while downloading.
 async fn init_translator(config: &TranslationConfig) -> Option<Arc<OllamaTranslator>> {
     if !config.enabled {
         return None;
     }
 
-    // For now, only Ollama is implemented
-    // M2M-100 will be added later
     match config.engine {
         TranslationEngineType::Ollama => {
             let translator = Arc::new(OllamaTranslator::new(
@@ -178,12 +187,169 @@ async fn init_translator(config: &TranslationConfig) -> Option<Arc<OllamaTransla
             }
         }
         TranslationEngineType::M2m100 => {
-            warn!(
-                "M2M-100 translation engine not yet implemented. Use engine = \"ollama\" instead."
-            );
-            None
+            // Check if M2M-100 model is downloaded
+            let model = M2M100Model::Small; // Default to 418M for reasonable download size
+
+            if is_m2m100_downloaded(model) {
+                // Model is ready - but M2M-100 engine integration not complete yet
+                // Fall back to Ollama for now
+                info!(
+                    "M2M-100 {} model available. Using Ollama as translator (M2M-100 integration pending).",
+                    model.name()
+                );
+                init_ollama_fallback(config).await
+            } else {
+                // Model not downloaded - spawn background download
+                info!(
+                    "M2M-100 {} model not found. Starting background download (~{} MB)...",
+                    model.name(),
+                    model.vram_mb()
+                );
+
+                // Spawn background download task
+                spawn_m2m100_download(model);
+
+                // Return Ollama as fallback while downloading
+                info!("Using Ollama for translation while M2M-100 downloads...");
+                init_ollama_fallback(config).await
+            }
         }
     }
+}
+
+/// Initialize Ollama translator as fallback.
+async fn init_ollama_fallback(config: &TranslationConfig) -> Option<Arc<OllamaTranslator>> {
+    let translator = Arc::new(OllamaTranslator::new(
+        &config.ollama_url,
+        &config.ollama_model,
+        config.timeout_secs,
+    ));
+
+    if translator.is_available().await {
+        info!(
+            "Ollama fallback enabled (model: {}, target: {})",
+            config.ollama_model, config.target_language
+        );
+        Some(translator)
+    } else {
+        warn!(
+            "Ollama not available at {}. Translation disabled until M2M-100 download completes.",
+            config.ollama_url
+        );
+        None
+    }
+}
+
+/// Spawn background task to download Whisper model (high priority).
+fn spawn_whisper_download(model: crate::engine::whisper::WhisperModel) {
+    use crate::engine::whisper::{download_model, format_size};
+
+    // Set flag to indicate high-priority download in progress
+    WHISPER_DOWNLOADING.store(true, Ordering::SeqCst);
+
+    tokio::spawn(async move {
+        info!(
+            "Background download started for Whisper {} (high priority)",
+            model.filename()
+        );
+
+        let mut last_percent = 0u32;
+        let result = download_model(model, |downloaded, total| {
+            if total > 0 {
+                let percent = ((downloaded as f64 / total as f64) * 100.0) as u32;
+                if percent >= last_percent + 10 {
+                    last_percent = percent;
+                    info!(
+                        "Whisper download: {}% ({} / {})",
+                        percent,
+                        format_size(downloaded),
+                        format_size(total)
+                    );
+                }
+            }
+        })
+        .await;
+
+        // Clear the download flag
+        WHISPER_DOWNLOADING.store(false, Ordering::SeqCst);
+
+        match result {
+            Ok(path) => {
+                info!(
+                    "Whisper {} downloaded successfully to: {}",
+                    model.filename(),
+                    path.display()
+                );
+                info!("Restart daemon to enable transcription.");
+
+                // Show desktop notification
+                #[cfg(unix)]
+                {
+                    let _ = notify_rust::Notification::new()
+                        .summary("OpenHush")
+                        .body("Whisper model downloaded. Restart daemon to enable transcription.")
+                        .show();
+                }
+            }
+            Err(e) => {
+                error!("Failed to download Whisper {}: {}", model.filename(), e);
+            }
+        }
+    });
+}
+
+/// Spawn background task to download M2M-100 model (low priority).
+/// Waits for any high-priority Whisper download to complete first.
+fn spawn_m2m100_download(model: M2M100Model) {
+    tokio::spawn(async move {
+        // Wait for Whisper download to complete if in progress
+        if WHISPER_DOWNLOADING.load(Ordering::SeqCst) {
+            info!("M2M-100 download queued (waiting for Whisper download to complete)...");
+            while WHISPER_DOWNLOADING.load(Ordering::SeqCst) {
+                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+            }
+            info!("Whisper download complete. Starting M2M-100 download...");
+        }
+
+        info!("Background download started for M2M-100 {}", model.name());
+
+        let mut last_percent = 0u64;
+        let result = download_m2m100_model(model, |filename, downloaded, total| {
+            // Log progress every 10%
+            if total > 0 {
+                let percent = (downloaded * 100) / total;
+                if percent >= last_percent + 10 {
+                    last_percent = percent;
+                    info!("M2M-100 download: {} - {}%", filename, percent);
+                }
+            }
+        })
+        .await;
+
+        match result {
+            Ok(path) => {
+                info!(
+                    "M2M-100 {} downloaded successfully to: {}",
+                    model.name(),
+                    path.display()
+                );
+                info!("Restart daemon to use M2M-100 for translation.");
+
+                // Show desktop notification
+                #[cfg(unix)]
+                {
+                    let _ = notify_rust::Notification::new()
+                        .summary("OpenHush")
+                        .body("M2M-100 translation model downloaded. Restart daemon to activate.")
+                        .show();
+                }
+            }
+            Err(e) => {
+                error!("Failed to download M2M-100 {}: {}", model.name(), e);
+                warn!("Translation will continue using Ollama if available.");
+            }
+        }
+    });
 }
 
 // ============================================================================
@@ -239,6 +405,10 @@ impl BackpressureConfig {
 ///
 /// Applies vocabulary replacements, LLM correction, translation, outputs the text,
 /// and runs post-transcription actions.
+///
+/// Translation uses sentence buffering - text is accumulated until complete
+/// sentences are detected, then translated and output. On is_final, the buffer
+/// is flushed to ensure all remaining text is processed.
 #[allow(clippy::too_many_arguments)]
 async fn process_and_output(
     result: TranscriptionResult,
@@ -247,6 +417,7 @@ async fn process_and_output(
     text_corrector: &Option<Arc<TextCorrector>>,
     translator: &Option<Arc<OllamaTranslator>>,
     translation_config: &TranslationConfig,
+    sentence_buffer: &mut SentenceBuffer,
     output_handler: &OutputHandler,
     action_runner: &ActionRunner,
     model_name: &str,
@@ -256,6 +427,20 @@ async fn process_and_output(
             "Empty transcription result (seq {}.{})",
             result.sequence_id, result.chunk_id
         );
+        // Even if empty, flush buffer on final chunk
+        if result.is_final {
+            flush_and_translate(
+                sentence_buffer,
+                translator,
+                translation_config,
+                output_handler,
+                action_runner,
+                model_name,
+                result.sequence_id,
+                result.duration_secs,
+            )
+            .await;
+        }
         return;
     }
 
@@ -278,53 +463,175 @@ async fn process_and_output(
         }
     }
 
-    // Apply translation
-    if let Some(ref trans) = translator {
-        // Detect source language from transcription config or use "auto"
-        // For now, assume the transcribed language is known
-        let source_lang = "auto"; // Could be improved to use detected language
-        let target_lang = &translation_config.target_language;
-
-        match trans.translate(&text, source_lang, target_lang).await {
-            Ok(translated) => {
-                if translation_config.preserve_original {
-                    // Output both original and translated
-                    text = format!(
-                        "[{}] {}\n[{}] {}",
-                        source_lang.to_uppercase(),
-                        text,
-                        target_lang.to_uppercase(),
-                        translated
-                    );
-                } else {
-                    text = translated;
-                }
-                debug!("Translation applied: {} -> {}", source_lang, target_lang);
-            }
-            Err(e) => warn!("Translation failed: {}", e),
-        }
+    // If translation is disabled, output directly
+    if translator.is_none() {
+        output_text(
+            &text,
+            output_handler,
+            action_runner,
+            model_name,
+            result.sequence_id,
+            result.chunk_id,
+            result.duration_secs,
+        )
+        .await;
+        return;
     }
 
+    // Translation enabled - use sentence buffer
+    let sentences = sentence_buffer.add(&text);
+
+    // Translate and output complete sentences
+    for sentence in sentences {
+        translate_and_output(
+            &sentence,
+            translator,
+            translation_config,
+            output_handler,
+            action_runner,
+            model_name,
+            result.sequence_id,
+            result.chunk_id,
+            result.duration_secs,
+        )
+        .await;
+    }
+
+    // On final chunk, flush remaining buffer
+    if result.is_final {
+        flush_and_translate(
+            sentence_buffer,
+            translator,
+            translation_config,
+            output_handler,
+            action_runner,
+            model_name,
+            result.sequence_id,
+            result.duration_secs,
+        )
+        .await;
+    }
+}
+
+/// Output text without translation.
+async fn output_text(
+    text: &str,
+    output_handler: &OutputHandler,
+    action_runner: &ActionRunner,
+    model_name: &str,
+    sequence_id: u64,
+    chunk_id: u32,
+    duration_secs: f32,
+) {
     info!(
         "📝 Output (seq {}.{}, {} chars)",
-        result.sequence_id,
-        result.chunk_id,
+        sequence_id,
+        chunk_id,
         text.len()
     );
 
-    if let Err(e) = output_handler.output(&text) {
+    if let Err(e) = output_handler.output(text) {
         error!("Output failed: {}", e);
     }
 
-    // Run post-transcription actions
     if action_runner.has_actions() {
         let ctx = ActionContext::new(
-            text,
-            result.duration_secs,
+            text.to_string(),
+            duration_secs,
             model_name.to_string(),
-            result.sequence_id,
+            sequence_id,
         );
         action_runner.run_all(&ctx).await;
+    }
+}
+
+/// Translate a sentence and output.
+#[allow(clippy::too_many_arguments)]
+async fn translate_and_output(
+    text: &str,
+    translator: &Option<Arc<OllamaTranslator>>,
+    translation_config: &TranslationConfig,
+    output_handler: &OutputHandler,
+    action_runner: &ActionRunner,
+    model_name: &str,
+    sequence_id: u64,
+    chunk_id: u32,
+    duration_secs: f32,
+) {
+    let Some(ref trans) = translator else {
+        return;
+    };
+
+    let source_lang = "auto";
+    let target_lang = &translation_config.target_language;
+
+    let output = match trans.translate(text, source_lang, target_lang).await {
+        Ok(translated) => {
+            debug!("Translation: '{}' -> '{}'", text, translated);
+            if translation_config.preserve_original {
+                format!(
+                    "[{}] {}\n[{}] {}",
+                    source_lang.to_uppercase(),
+                    text,
+                    target_lang.to_uppercase(),
+                    translated
+                )
+            } else {
+                translated
+            }
+        }
+        Err(e) => {
+            warn!("Translation failed: {}", e);
+            text.to_string() // Fall back to original
+        }
+    };
+
+    info!(
+        "📝 Translated output (seq {}.{}, {} chars)",
+        sequence_id,
+        chunk_id,
+        output.len()
+    );
+
+    if let Err(e) = output_handler.output(&output) {
+        error!("Output failed: {}", e);
+    }
+
+    if action_runner.has_actions() {
+        let ctx = ActionContext::new(output, duration_secs, model_name.to_string(), sequence_id);
+        action_runner.run_all(&ctx).await;
+    }
+}
+
+/// Flush sentence buffer and translate remaining text.
+#[allow(clippy::too_many_arguments)]
+async fn flush_and_translate(
+    sentence_buffer: &mut SentenceBuffer,
+    translator: &Option<Arc<OllamaTranslator>>,
+    translation_config: &TranslationConfig,
+    output_handler: &OutputHandler,
+    action_runner: &ActionRunner,
+    model_name: &str,
+    sequence_id: u64,
+    duration_secs: f32,
+) {
+    if let Some(remaining) = sentence_buffer.flush() {
+        debug!(
+            "Flushing sentence buffer: {} chars remaining",
+            remaining.len()
+        );
+        translate_and_output(
+            &remaining,
+            translator,
+            translation_config,
+            output_handler,
+            action_runner,
+            model_name,
+            sequence_id,
+            0, // chunk_id unknown at flush time
+            duration_secs,
+        )
+        .await;
     }
 }
 
@@ -568,23 +875,48 @@ impl Daemon {
                 None
             };
 
-        // Check if model exists (even for lazy loading, we verify at startup)
+        // Check if model exists - download in background if missing
         let model_path = self.model_path()?;
         let effective_model = self.config.transcription.effective_model().to_string();
-        if !model_path.exists() {
-            error!(
-                "Model not found at: {}. Run 'openhush model download {}'",
-                model_path.display(),
-                effective_model
+        let model_downloading = if !model_path.exists() {
+            warn!(
+                "Model not found at: {}. Starting background download...",
+                model_path.display()
             );
-            return Err(DaemonError::Whisper(WhisperError::ModelNotFound(
-                model_path,
-                effective_model.to_string(),
-            )));
-        }
 
-        // Load engine based on preload config
-        let preload = self.config.transcription.preload;
+            // Parse model name to WhisperModel enum
+            if let Ok(whisper_model) =
+                effective_model.parse::<crate::engine::whisper::WhisperModel>()
+            {
+                // Spawn background download (high priority)
+                spawn_whisper_download(whisper_model);
+
+                // Show notification
+                #[cfg(unix)]
+                {
+                    let _ = notify_rust::Notification::new()
+                        .summary("OpenHush")
+                        .body(&format!(
+                            "Downloading Whisper {} model. Transcription will be available after restart.",
+                            effective_model
+                        ))
+                        .show();
+                }
+
+                true
+            } else {
+                error!(
+                    "Unknown model '{}'. Cannot download automatically.",
+                    effective_model
+                );
+                false
+            }
+        } else {
+            false
+        };
+
+        // Load engine based on preload config (skip if downloading)
+        let preload = self.config.transcription.preload && !model_downloading;
         let (initial_engine, chunk_interval_secs) = if preload {
             let use_gpu = self.config.transcription.device.to_lowercase() != "cpu";
             info!("Loading Whisper model (GPU: {})...", use_gpu);
@@ -629,8 +961,12 @@ impl Daemon {
 
             (Some(engine), chunk_interval_secs)
         } else {
-            info!("Lazy loading enabled - model will be loaded on first transcription request");
-            // Use configured interval or default when lazy loading
+            if model_downloading {
+                info!("Whisper model downloading - transcription unavailable until restart");
+            } else {
+                info!("Lazy loading enabled - model will be loaded on first transcription request");
+            }
+            // Use configured interval or default when lazy loading/downloading
             let configured_interval = self.config.queue.chunk_interval_secs;
             let chunk_interval_secs = if configured_interval <= 0.0 {
                 info!("Using default chunk interval (5.0s) for lazy loading mode");
@@ -747,6 +1083,9 @@ impl Daemon {
         // Initialize translator if enabled
         let translator = init_translator(&self.config.translation).await;
         let translation_config = self.config.translation.clone();
+
+        // Sentence buffer for translation (accumulates until complete sentences)
+        let mut sentence_buffer = SentenceBuffer::new();
 
         // Create transcription command and result channels
         let (command_tx, command_rx) = mpsc::channel::<WorkerCommand>(CHANNEL_BUFFER_SIZE);
@@ -1350,6 +1689,7 @@ impl Daemon {
                                         &text_corrector,
                                         &translator,
                                         &translation_config,
+                                        &mut sentence_buffer,
                                         &output_handler,
                                         &action_runner,
                                         &effective_model,
@@ -1386,6 +1726,7 @@ impl Daemon {
                                 &text_corrector,
                                 &translator,
                                 &translation_config,
+                                &mut sentence_buffer,
                                 &output_handler,
                                 &action_runner,
                                 &effective_model,
@@ -1885,9 +2226,27 @@ fn remove_pid() -> Result<(), DaemonError> {
     Ok(())
 }
 
-/// Start the daemon
-pub async fn run(foreground: bool, enable_tray: bool) -> Result<(), DaemonError> {
+/// Early daemonization - called BEFORE tokio runtime starts
+/// This avoids the fork+threads problem that breaks D-Bus connections
+#[cfg(unix)]
+pub fn daemonize_early(enable_tray: bool) -> Result<(), DaemonError> {
     // Check for stale PID file and clean up if needed
+    check_and_cleanup_stale_pid()?;
+
+    if is_running() {
+        return Err(DaemonError::AlreadyRunning);
+    }
+
+    // When tray is enabled, use light daemonization (no setsid)
+    // to preserve D-Bus session bus access for StatusNotifierItem
+    daemonize_process(enable_tray)?;
+
+    Ok(())
+}
+
+/// Start the daemon
+pub async fn run(_foreground: bool, enable_tray: bool) -> Result<(), DaemonError> {
+    // Check for stale PID file and clean up if needed (may already be done in daemonize_early)
     check_and_cleanup_stale_pid()?;
 
     if is_running() {
@@ -1896,16 +2255,14 @@ pub async fn run(foreground: bool, enable_tray: bool) -> Result<(), DaemonError>
 
     let config = Config::load()?;
 
+    // On Windows, hide console window for non-foreground mode
+    #[cfg(windows)]
     if !foreground {
-        #[cfg(unix)]
-        {
-            daemonize_process()?;
-        }
-        #[cfg(windows)]
-        {
-            hide_console_window();
-        }
+        hide_console_window();
     }
+
+    // Unix daemonization now happens in main() before tokio starts
+    // This is required because fork() doesn't work with threads
 
     write_pid()?;
 
@@ -1935,8 +2292,12 @@ fn hide_console_window() {
 }
 
 /// Perform Unix daemonization using nix crate
+///
+/// # Arguments
+/// * `keep_session` - If true, skip setsid() to preserve D-Bus session bus access
+///   (needed for system tray via StatusNotifierItem)
 #[cfg(unix)]
-fn daemonize_process() -> Result<(), DaemonError> {
+fn daemonize_process(keep_session: bool) -> Result<(), DaemonError> {
     use nix::unistd::{chdir, dup2, fork, setsid, ForkResult};
     use std::fs::File;
     use std::os::unix::io::AsRawFd;
@@ -1961,7 +2322,14 @@ fn daemonize_process() -> Result<(), DaemonError> {
         .map_err(|e| DaemonError::DaemonizeFailed(format!("Cannot create stderr file: {}", e)))?;
 
     // Print before forking so user sees the message
-    println!("Daemonizing OpenHush (logs: {:?})...", log_dir);
+    if keep_session {
+        println!(
+            "Daemonizing OpenHush (light mode for tray, logs: {:?})...",
+            log_dir
+        );
+    } else {
+        println!("Daemonizing OpenHush (logs: {:?})...", log_dir);
+    }
 
     // First fork: create child process
     // SAFETY: fork() is safe when called before spawning threads.
@@ -1982,28 +2350,33 @@ fn daemonize_process() -> Result<(), DaemonError> {
         }
     }
 
-    // Create new session, become session leader
-    setsid().map_err(|e| DaemonError::DaemonizeFailed(format!("setsid failed: {}", e)))?;
+    // When keep_session is true (tray enabled), skip setsid() and second fork
+    // to preserve D-Bus session bus access for StatusNotifierItem.
+    // The session bus is per-login-session, and setsid() creates a new session.
+    if !keep_session {
+        // Create new session, become session leader
+        setsid().map_err(|e| DaemonError::DaemonizeFailed(format!("setsid failed: {}", e)))?;
 
-    // Second fork: ensure we can never acquire a controlling terminal
-    // SAFETY: Same as above, we're still single-threaded at this point
-    match unsafe { fork() } {
-        Ok(ForkResult::Parent { .. }) => {
-            std::process::exit(0);
+        // Second fork: ensure we can never acquire a controlling terminal
+        // SAFETY: Same as above, we're still single-threaded at this point
+        match unsafe { fork() } {
+            Ok(ForkResult::Parent { .. }) => {
+                std::process::exit(0);
+            }
+            Ok(ForkResult::Child) => {
+                // Continue in grandchild
+            }
+            Err(e) => {
+                return Err(DaemonError::DaemonizeFailed(format!(
+                    "Second fork failed: {}",
+                    e
+                )));
+            }
         }
-        Ok(ForkResult::Child) => {
-            // Continue in grandchild
-        }
-        Err(e) => {
-            return Err(DaemonError::DaemonizeFailed(format!(
-                "Second fork failed: {}",
-                e
-            )));
-        }
+
+        // Change working directory to root (only for full daemon mode)
+        chdir("/").map_err(|e| DaemonError::DaemonizeFailed(format!("chdir failed: {}", e)))?;
     }
-
-    // Change working directory to root
-    chdir("/").map_err(|e| DaemonError::DaemonizeFailed(format!("chdir failed: {}", e)))?;
 
     // Redirect stdout/stderr to log files
     // Note: We don't redirect stdin as it's not needed for a daemon
@@ -2012,7 +2385,11 @@ fn daemonize_process() -> Result<(), DaemonError> {
     dup2(stderr_file.as_raw_fd(), 2)
         .map_err(|e| DaemonError::DaemonizeFailed(format!("dup2 stderr failed: {}", e)))?;
 
-    info!("Daemonized successfully (PID: {})", std::process::id());
+    info!(
+        "Daemonized successfully (PID: {}, keep_session: {})",
+        std::process::id(),
+        keep_session
+    );
 
     Ok(())
 }

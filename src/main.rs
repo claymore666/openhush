@@ -86,13 +86,25 @@ enum Commands {
         #[arg(long)]
         language: Option<String>,
 
-        /// Enable translation to English (use --translate or --no-translate)
+        /// Enable Whisper's built-in translation to English (--translate/--no-translate)
         #[arg(long, action = clap::ArgAction::Set)]
         translate: Option<bool>,
 
         /// Enable/disable LLM correction
         #[arg(long)]
         llm: Option<String>,
+
+        /// Enable/disable real-time translation (m2m100 or ollama)
+        #[arg(long, action = clap::ArgAction::Set)]
+        translation: Option<bool>,
+
+        /// Set translation engine (m2m100 or ollama)
+        #[arg(long)]
+        translation_engine: Option<String>,
+
+        /// Set translation target language (e.g., "de", "fr", "es")
+        #[arg(long)]
+        translation_target: Option<String>,
 
         /// Show current configuration
         #[arg(long)]
@@ -372,13 +384,32 @@ fn init_logging(verbose: bool, foreground: bool, config_level: Option<&str>) -> 
     }
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
     // Install panic handler first, before anything else
     panic_handler::install();
 
     let cli = Cli::parse();
 
+    // Handle daemonization BEFORE starting tokio runtime
+    // Fork + threads = broken, so we must fork first
+    #[cfg(unix)]
+    if let Commands::Start {
+        foreground: false,
+        no_tray,
+    } = &cli.command
+    {
+        // Daemonize before any async runtime or threads are started
+        daemon::daemonize_early(!no_tray)?;
+    }
+
+    // Now start the tokio runtime (after fork if daemonizing)
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(async_main(cli))
+}
+
+async fn async_main(cli: Cli) -> anyhow::Result<()> {
     // Determine if we're running in foreground mode for logging
     let foreground_mode = match &cli.command {
         Commands::Start { foreground, .. } => *foreground,
@@ -404,6 +435,7 @@ async fn main() -> anyhow::Result<()> {
             }
 
             info!("Starting OpenHush daemon...");
+            // Note: daemonization already happened in main() before tokio started
             daemon::run(foreground, !no_tray).await?;
         }
 
@@ -433,12 +465,24 @@ async fn main() -> anyhow::Result<()> {
             language,
             translate,
             llm,
+            translation,
+            translation_engine,
+            translation_target,
             show,
         } => {
             if show {
                 config::show()?;
             } else {
-                config::update(hotkey, model, language, translate, llm)?;
+                config::update(
+                    hotkey,
+                    model,
+                    language,
+                    translate,
+                    llm,
+                    translation,
+                    translation_engine,
+                    translation_target,
+                )?;
             }
         }
 
@@ -466,9 +510,68 @@ async fn main() -> anyhow::Result<()> {
                     return Ok(());
                 }
 
+                // Handle M2M-100 translation model downloads
+                if name.starts_with("m2m100") || name == "m2m-100" {
+                    use translation::{download_m2m100_model, is_m2m100_downloaded, M2M100Model};
+
+                    let model: M2M100Model = name.parse().map_err(|e: String| {
+                        anyhow::anyhow!(
+                            "{}\nAvailable: m2m100-418m (1.5GB), m2m100-1.2b (4.5GB)",
+                            e
+                        )
+                    })?;
+
+                    if is_m2m100_downloaded(model) {
+                        println!("M2M-100 {} already downloaded.", model.name());
+                        return Ok(());
+                    }
+
+                    println!(
+                        "Downloading M2M-100 {} (~{} MB)...\n\
+                         Note: ONNX models need to be exported from HuggingFace.",
+                        model.name(),
+                        model.vram_mb()
+                    );
+
+                    let mut current_file = String::new();
+                    let mut last_percent = 0u32;
+
+                    let path = download_m2m100_model(model, |filename, downloaded, total| {
+                        if current_file != filename {
+                            if !current_file.is_empty() {
+                                println!();
+                            }
+                            current_file = filename.to_string();
+                            last_percent = 0;
+                            print!("  {}: ", filename);
+                            let _ = std::io::stdout().flush();
+                        }
+
+                        if total > 0 {
+                            let percent = ((downloaded as f64 / total as f64) * 100.0) as u32;
+                            if percent > last_percent {
+                                last_percent = percent;
+                                print!("\r  {}: {}%", filename, percent);
+                                let _ = std::io::stdout().flush();
+                            }
+                        }
+                    })
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+                    println!(
+                        "\n\nM2M-100 {} downloaded to: {}",
+                        model.name(),
+                        path.display()
+                    );
+                    println!("\nTo use M2M-100 for translation:");
+                    println!("  openhush config --translation true --translation-engine m2m100 --translation-target de");
+                    return Ok(());
+                }
+
                 let model: WhisperModel = name.parse().map_err(|()| {
                     anyhow::anyhow!(
-                        "Unknown model '{}'. Available: tiny, base, small, medium, large-v3, wake-word",
+                        "Unknown model '{}'. Available: tiny, base, small, medium, large-v3, wake-word, m2m100-418m, m2m100-1.2b",
                         name
                     )
                 })?;
@@ -548,6 +651,36 @@ async fn main() -> anyhow::Result<()> {
                     );
                 }
 
+                // Show M2M-100 translation models
+                println!("\nTranslation models (M2M-100):\n");
+                println!(
+                    "  {:<12} {:<10} {:<10} Description",
+                    "Model", "VRAM", "Status"
+                );
+                println!("  {}", "-".repeat(60));
+                {
+                    use translation::{is_m2m100_downloaded, M2M100Model};
+
+                    for (model, desc) in [
+                        (M2M100Model::Small, "418M params, balanced"),
+                        (M2M100Model::Large, "1.2B params, best quality"),
+                    ] {
+                        let status = if is_m2m100_downloaded(model) {
+                            "✓ local"
+                        } else {
+                            "remote"
+                        };
+                        let vram = format!("~{} MB", model.vram_mb());
+                        println!(
+                            "  {:<12} {:<10} {:<10} {}",
+                            model.name(),
+                            vram,
+                            status,
+                            desc
+                        );
+                    }
+                }
+
                 println!("\nUse 'openhush model download <name>' to download a model.");
             }
             ModelAction::Remove { name } => {
@@ -568,9 +701,28 @@ async fn main() -> anyhow::Result<()> {
                     return Ok(());
                 }
 
+                // Handle M2M-100 translation model removal
+                if name.starts_with("m2m100") || name == "m2m-100" {
+                    use translation::{is_m2m100_downloaded, remove_m2m100_model, M2M100Model};
+
+                    let model: M2M100Model = name.parse().map_err(|e: String| {
+                        anyhow::anyhow!("{}\nAvailable: m2m100-418m, m2m100-1.2b", e)
+                    })?;
+
+                    if !is_m2m100_downloaded(model) {
+                        println!("M2M-100 {} is not installed.", model.name());
+                        return Ok(());
+                    }
+
+                    remove_m2m100_model(model)
+                        .map_err(|e| anyhow::anyhow!("Failed to remove M2M-100 model: {}", e))?;
+                    println!("Removed M2M-100 {} model.", model.name());
+                    return Ok(());
+                }
+
                 let model: WhisperModel = name.parse().map_err(|()| {
                     anyhow::anyhow!(
-                        "Unknown model '{}'. Available: tiny, base, small, medium, large-v3, wake-word",
+                        "Unknown model '{}'. Available: tiny, base, small, medium, large-v3, wake-word, m2m100-418m, m2m100-1.2b",
                         name
                     )
                 })?;
