@@ -9,11 +9,19 @@
 
 mod m2m100;
 mod ollama;
+mod sentence_buffer;
 
-// M2M-100 exports (not yet fully implemented)
-#[allow(unused_imports)]
-pub use m2m100::{M2M100Engine, M2M100Error};
+// M2M-100 exports
+pub use m2m100::{
+    download_model as download_m2m100_model, is_model_downloaded as is_m2m100_downloaded,
+    model_dir as m2m100_model_dir, remove_model as remove_m2m100_model, M2M100Engine, M2M100Error,
+    M2M100Model,
+};
 pub use ollama::OllamaTranslator;
+pub use sentence_buffer::SentenceBuffer;
+
+use std::sync::Arc;
+use tracing::warn;
 
 use std::fmt;
 use thiserror::Error;
@@ -117,6 +125,69 @@ impl std::str::FromStr for TranslationEngineType {
             "m2m100" | "m2m-100" | "m2m" => Ok(Self::M2M100),
             "ollama" | "llm" => Ok(Self::Ollama),
             _ => Err(format!("Unknown translation engine: {}", s)),
+        }
+    }
+}
+
+/// Unified translator that can use either M2M-100 or Ollama backend.
+///
+/// This enum provides a common interface for translation regardless of the
+/// underlying engine, making it easy to switch between backends.
+pub enum Translator {
+    /// M2M-100 neural translation engine
+    M2M100(Arc<M2M100Engine>),
+    /// Ollama LLM-based translation
+    Ollama(Arc<OllamaTranslator>),
+}
+
+impl Translator {
+    /// Translate text from source to target language.
+    pub async fn translate(
+        &self,
+        text: &str,
+        from: &str,
+        to: &str,
+    ) -> Result<String, TranslationError> {
+        match self {
+            Translator::M2M100(engine) => {
+                // M2M-100 doesn't support auto detection, use detected language or default
+                let actual_from = if from == "auto" {
+                    warn!("M2M-100 doesn't support auto language detection, defaulting to 'en'");
+                    "en"
+                } else {
+                    from
+                };
+                engine
+                    .translate_sync(text, actual_from, to)
+                    .map_err(TranslationError::M2M100)
+            }
+            Translator::Ollama(translator) => {
+                <OllamaTranslator as TranslationEngine>::translate(
+                    translator.as_ref(),
+                    text,
+                    from,
+                    to,
+                )
+                .await
+            }
+        }
+    }
+
+    /// Get the name of the translation engine.
+    #[allow(dead_code)]
+    pub fn name(&self) -> &str {
+        match self {
+            Translator::M2M100(_) => "m2m100",
+            Translator::Ollama(_) => "ollama",
+        }
+    }
+
+    /// Check if a language pair is supported.
+    #[allow(dead_code)]
+    pub fn supports_pair(&self, from: &str, to: &str) -> bool {
+        match self {
+            Translator::M2M100(engine) => engine.supports_pair(from, to),
+            Translator::Ollama(_) => true, // Ollama supports any pair
         }
     }
 }

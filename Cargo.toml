@@ -39,6 +39,9 @@ rubato = "0.16"
 # Wake word detection (openWakeWord ONNX models)
 ort = { version = "2.0.0-rc.10", features = ["load-dynamic"] }
 
+# Tokenization for M2M-100 translation
+tokenizers = "0.22"
+
 # WAV file reading for one-shot transcription
 hound = "3.5"
 

@@ -29,8 +29,8 @@ use crate::queue::{
     WorkerCommand,
 };
 use crate::translation::{
-    download_m2m100_model, is_m2m100_downloaded, M2M100Model, OllamaTranslator, SentenceBuffer,
-    TranslationEngine,
+    download_m2m100_model, is_m2m100_downloaded, m2m100_model_dir, M2M100Engine, M2M100Model,
+    OllamaTranslator, SentenceBuffer, Translator,
 };
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 use crate::tray::{TrayEvent, TrayManager};
@@ -159,7 +159,7 @@ async fn init_corrector(config: &CorrectionConfig) -> Option<Arc<TextCorrector>>
 ///
 /// For M2M-100: If model not downloaded, spawns background download and returns
 /// Ollama as fallback translator while downloading.
-async fn init_translator(config: &TranslationConfig) -> Option<Arc<OllamaTranslator>> {
+async fn init_translator(config: &TranslationConfig) -> Option<Arc<Translator>> {
     if !config.enabled {
         return None;
     }
@@ -177,7 +177,7 @@ async fn init_translator(config: &TranslationConfig) -> Option<Arc<OllamaTransla
                     "Translation enabled (engine: ollama, model: {}, target: {})",
                     config.ollama_model, config.target_language
                 );
-                Some(translator)
+                Some(Arc::new(Translator::Ollama(translator)))
             } else {
                 warn!(
                     "Ollama not available at {}. Continuing without translation.",
@@ -191,13 +191,24 @@ async fn init_translator(config: &TranslationConfig) -> Option<Arc<OllamaTransla
             let model = M2M100Model::Small; // Default to 418M for reasonable download size
 
             if is_m2m100_downloaded(model) {
-                // Model is ready - but M2M-100 engine integration not complete yet
-                // Fall back to Ollama for now
-                info!(
-                    "M2M-100 {} model available. Using Ollama as translator (M2M-100 integration pending).",
-                    model.name()
-                );
-                init_ollama_fallback(config).await
+                // Model is ready - load M2M-100 engine
+                match init_m2m100_engine(model) {
+                    Ok(engine) => {
+                        info!(
+                            "Translation enabled (engine: m2m100, model: {}, target: {})",
+                            model.name(),
+                            config.target_language
+                        );
+                        Some(Arc::new(Translator::M2M100(Arc::new(engine))))
+                    }
+                    Err(e) => {
+                        warn!(
+                            "Failed to load M2M-100 engine: {}. Falling back to Ollama.",
+                            e
+                        );
+                        init_ollama_fallback(config).await
+                    }
+                }
             } else {
                 // Model not downloaded - spawn background download
                 info!(
@@ -217,8 +228,16 @@ async fn init_translator(config: &TranslationConfig) -> Option<Arc<OllamaTransla
     }
 }
 
+/// Initialize M2M-100 translation engine.
+fn init_m2m100_engine(model: M2M100Model) -> Result<M2M100Engine, crate::translation::M2M100Error> {
+    let model_dir = m2m100_model_dir(model)?;
+    let mut engine = M2M100Engine::new(model, model_dir);
+    engine.load()?;
+    Ok(engine)
+}
+
 /// Initialize Ollama translator as fallback.
-async fn init_ollama_fallback(config: &TranslationConfig) -> Option<Arc<OllamaTranslator>> {
+async fn init_ollama_fallback(config: &TranslationConfig) -> Option<Arc<Translator>> {
     let translator = Arc::new(OllamaTranslator::new(
         &config.ollama_url,
         &config.ollama_model,
@@ -230,7 +249,7 @@ async fn init_ollama_fallback(config: &TranslationConfig) -> Option<Arc<OllamaTr
             "Ollama fallback enabled (model: {}, target: {})",
             config.ollama_model, config.target_language
         );
-        Some(translator)
+        Some(Arc::new(Translator::Ollama(translator)))
     } else {
         warn!(
             "Ollama not available at {}. Translation disabled until M2M-100 download completes.",
@@ -415,7 +434,7 @@ async fn process_and_output(
     chunk_separator: &str,
     vocabulary_manager: &Option<Arc<VocabularyManager>>,
     text_corrector: &Option<Arc<TextCorrector>>,
-    translator: &Option<Arc<OllamaTranslator>>,
+    translator: &Option<Arc<Translator>>,
     translation_config: &TranslationConfig,
     sentence_buffer: &mut SentenceBuffer,
     output_handler: &OutputHandler,
@@ -549,7 +568,7 @@ async fn output_text(
 #[allow(clippy::too_many_arguments)]
 async fn translate_and_output(
     text: &str,
-    translator: &Option<Arc<OllamaTranslator>>,
+    translator: &Option<Arc<Translator>>,
     translation_config: &TranslationConfig,
     output_handler: &OutputHandler,
     action_runner: &ActionRunner,
@@ -607,7 +626,7 @@ async fn translate_and_output(
 #[allow(clippy::too_many_arguments)]
 async fn flush_and_translate(
     sentence_buffer: &mut SentenceBuffer,
-    translator: &Option<Arc<OllamaTranslator>>,
+    translator: &Option<Arc<Translator>>,
     translation_config: &TranslationConfig,
     output_handler: &OutputHandler,
     action_runner: &ActionRunner,
