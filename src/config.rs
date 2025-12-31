@@ -1409,12 +1409,16 @@ pub fn show() -> anyhow::Result<()> {
 }
 
 /// Update configuration
+#[allow(clippy::too_many_arguments)]
 pub fn update(
     hotkey: Option<String>,
     model: Option<String>,
     language: Option<String>,
     translate: Option<bool>,
     llm: Option<String>,
+    translation: Option<bool>,
+    translation_engine: Option<String>,
+    translation_target: Option<String>,
 ) -> anyhow::Result<()> {
     let mut config = Config::load()?;
     let mut changed = false;
@@ -1449,6 +1453,32 @@ pub fn update(
                 config.correction.ollama_model = model_name.to_string();
             }
         }
+        changed = true;
+    }
+
+    // Translation settings
+    if let Some(enabled) = translation {
+        config.translation.enabled = enabled;
+        changed = true;
+    }
+
+    if let Some(engine) = translation_engine {
+        let engine_lower = engine.to_lowercase();
+        match engine_lower.as_str() {
+            "m2m100" | "m2m" => config.translation.engine = TranslationEngine::M2m100,
+            "ollama" | "llm" => config.translation.engine = TranslationEngine::Ollama,
+            _ => {
+                return Err(anyhow::anyhow!(
+                    "Unknown translation engine '{}'. Use 'm2m100' or 'ollama'.",
+                    engine
+                ));
+            }
+        }
+        changed = true;
+    }
+
+    if let Some(target) = translation_target {
+        config.translation.target_language = target;
         changed = true;
     }
 
@@ -1533,23 +1563,32 @@ mod tests {
 
     #[test]
     fn test_effective_model_with_preset() {
-        let mut config = TranscriptionConfig::default();
-
-        config.preset = TranscriptionPreset::Instant;
+        let config = TranscriptionConfig {
+            preset: TranscriptionPreset::Instant,
+            ..Default::default()
+        };
         assert_eq!(config.effective_model(), "small");
 
-        config.preset = TranscriptionPreset::Balanced;
+        let config = TranscriptionConfig {
+            preset: TranscriptionPreset::Balanced,
+            ..Default::default()
+        };
         assert_eq!(config.effective_model(), "medium");
 
-        config.preset = TranscriptionPreset::Quality;
+        let config = TranscriptionConfig {
+            preset: TranscriptionPreset::Quality,
+            ..Default::default()
+        };
         assert_eq!(config.effective_model(), "large-v3");
     }
 
     #[test]
     fn test_effective_model_custom() {
-        let mut config = TranscriptionConfig::default();
-        config.preset = TranscriptionPreset::Custom;
-        config.model = "tiny".to_string();
+        let config = TranscriptionConfig {
+            preset: TranscriptionPreset::Custom,
+            model: "tiny".to_string(),
+            ..Default::default()
+        };
         assert_eq!(config.effective_model(), "tiny");
     }
 

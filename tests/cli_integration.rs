@@ -7,6 +7,7 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 
 /// Get a Command for the openhush binary
+#[allow(deprecated)]
 fn openhush() -> Command {
     Command::cargo_bin("openhush").unwrap()
 }

@@ -697,7 +697,7 @@ mod tests {
             for &sample in &samples {
                 assert!(sample.is_finite(), "Sample should be finite");
                 assert!(
-                    sample >= -1.0 && sample <= 1.0,
+                    (-1.0..=1.0).contains(&sample),
                     "Sample should be normalized"
                 );
             }

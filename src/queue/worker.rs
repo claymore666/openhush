@@ -463,7 +463,7 @@ mod tests {
             sequence_id: 5,
             chunk_id: 2,
             is_final: false,
-            duration_secs: 3.14,
+            duration_secs: 3.5,
         };
         let debug_str = format!("{:?}", result);
         assert!(debug_str.contains("Test"));
