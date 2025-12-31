@@ -363,6 +363,41 @@ fn spawn_m2m100_download(model: M2M100Model) {
     });
 }
 
+/// Spawn background task to download wake word models (medium priority).
+/// Waits for any higher-priority downloads to complete first.
+fn spawn_wake_word_download() {
+    use crate::input::wake_word::WakeWordDetector;
+
+    tokio::spawn(async move {
+        // Acquire medium-priority download slot (waits for high priority downloads)
+        info!("Wake word download queued (medium priority)...");
+        let _guard = acquire_download_slot(DownloadPriority::Medium).await;
+
+        info!("Background download started for wake word models");
+
+        match WakeWordDetector::download_models().await {
+            Ok(_) => {
+                info!("Wake word models downloaded successfully");
+                info!("Restart daemon to enable wake word detection.");
+
+                // Show desktop notification
+                #[cfg(unix)]
+                {
+                    let _ = notify_rust::Notification::new()
+                        .summary("OpenHush")
+                        .body("Wake word models downloaded. Restart daemon to activate.")
+                        .show();
+                }
+            }
+            Err(e) => {
+                error!("Failed to download wake word models: {}", e);
+            }
+        }
+
+        // Guard dropped here, releasing the download slot
+    });
+}
+
 // ============================================================================
 // Output Processing
 // ============================================================================
@@ -1045,7 +1080,8 @@ impl Daemon {
         // Initialize wake word detector if enabled
         let mut wake_word_detector: Option<WakeWordDetector> = if wake_word_enabled {
             if !WakeWordDetector::models_available() {
-                warn!("Wake word models not found. Run: openhush model download wake-word");
+                warn!("Wake word models not found. Starting background download...");
+                spawn_wake_word_download();
                 None
             } else {
                 match WakeWordDetector::new(&self.config.wake_word) {
