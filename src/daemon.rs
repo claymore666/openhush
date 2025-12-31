@@ -2264,7 +2264,8 @@ pub fn daemonize_early(enable_tray: bool) -> Result<(), DaemonError> {
 }
 
 /// Start the daemon
-pub async fn run(_foreground: bool, enable_tray: bool) -> Result<(), DaemonError> {
+#[allow(unused_variables)]
+pub async fn run(foreground: bool, enable_tray: bool) -> Result<(), DaemonError> {
     // Check for stale PID file and clean up if needed (may already be done in daemonize_early)
     check_and_cleanup_stale_pid()?;
 
