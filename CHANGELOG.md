@@ -6,7 +6,7 @@ All notable changes to OpenHush are documented here.
 
 ---
 
-## [0.6.0] - 2025-12-26
+## [0.6.0] - 2025-12-31
 
 ### Advanced Features & Extensibility
 
@@ -15,7 +15,10 @@ This release adds powerful new features for hands-free operation, automation, an
 **Highlights:**
 
 - **Wake Word Detection** — Say "Hey OpenHush" for hands-free activation using openWakeWord ONNX models
+- **Real-Time Translation** — Translate transcriptions on-the-fly using M2M-100 neural translation engine (100+ languages)
+- **Meeting Summarization** — Generate meeting summaries with configurable LLM backends (Ollama, OpenAI)
 - **System Audio Capture** — Transcribe meetings, calls, and desktop audio via PulseAudio/PipeWire monitor sources (Linux)
+- **REST API** — Control OpenHush remotely with Swagger UI and optional OAuth authentication
 - **Post-Transcription Actions** — Run shell commands, send HTTP requests, or log to files after each transcription
 - **App-Aware Profiles** — Different settings per application (e.g., aggressive filler removal in email, conservative in code editors)
 - **Secure Secret Management** — Store API keys in platform keyrings (Keychain, Credential Manager, Secret Service)
@@ -45,6 +48,14 @@ This release adds powerful new features for hands-free operation, automation, an
 - **Platform Keyring Integration** — Secrets stored encrypted in OS credential managers
 - **Sandbox Detection** — Runtime detection of AppArmor, SELinux, Firejail, Flatpak
 
+**Audio & Model Management:**
+
+- **Audio Channel Selector** — GUI and CLI for selecting input channels from multi-channel devices
+- **Model Memory Management** — Lazy loading with configurable idle timeout for automatic unloading
+- **Background Model Downloads** — Models download automatically on first run without blocking startup
+- **Download Queue** — Priority-based queue for managing multiple model downloads
+- **Wake Word Model Support** — `openhush model download` now supports wake word models
+
 **Under the Hood:**
 
 - Modular service management (`src/service/`)
@@ -53,6 +64,7 @@ This release adds powerful new features for hands-free operation, automation, an
 - Action runner with variable substitution (`src/output/actions.rs`)
 - RAII-compliant FFI memory management for WhisperEngine
 - Direct FFI bindings for Windows named pipes (no external dependencies)
+- M2M-100 neural translation engine integration (`src/translation/`)
 
 ---
 
