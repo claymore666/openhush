@@ -15,6 +15,7 @@ use crate::config::{
 use crate::correction::TextCorrector;
 #[cfg(target_os = "linux")]
 use crate::dbus::{DaemonCommand, DaemonStatus, DbusService};
+use crate::download_queue::{acquire_download_slot, DownloadPriority};
 use crate::engine::{WhisperEngine, WhisperError};
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 use crate::gui;
@@ -38,15 +39,10 @@ use crate::vad::VadConfig;
 use crate::vad::{silero::SileroVad, VadEngine, VadError, VadState};
 use crate::vocabulary::{VocabularyError, VocabularyManager};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::{mpsc, RwLock};
 use tracing::{debug, error, info, warn};
-
-/// Global flag indicating a high-priority download is in progress.
-/// M2M-100 download waits for this to be false before starting.
-static WHISPER_DOWNLOADING: AtomicBool = AtomicBool::new(false);
 
 /// Channel buffer size for job and result queues
 const CHANNEL_BUFFER_SIZE: usize = 32;
@@ -263,10 +259,10 @@ async fn init_ollama_fallback(config: &TranslationConfig) -> Option<Arc<Translat
 fn spawn_whisper_download(model: crate::engine::whisper::WhisperModel) {
     use crate::engine::whisper::{download_model, format_size};
 
-    // Set flag to indicate high-priority download in progress
-    WHISPER_DOWNLOADING.store(true, Ordering::SeqCst);
-
     tokio::spawn(async move {
+        // Acquire high-priority download slot (blocks lower priority downloads)
+        let _guard = acquire_download_slot(DownloadPriority::High).await;
+
         info!(
             "Background download started for Whisper {} (high priority)",
             model.filename()
@@ -289,8 +285,7 @@ fn spawn_whisper_download(model: crate::engine::whisper::WhisperModel) {
         })
         .await;
 
-        // Clear the download flag
-        WHISPER_DOWNLOADING.store(false, Ordering::SeqCst);
+        // Guard dropped here, releasing the download slot
 
         match result {
             Ok(path) => {
@@ -318,17 +313,12 @@ fn spawn_whisper_download(model: crate::engine::whisper::WhisperModel) {
 }
 
 /// Spawn background task to download M2M-100 model (low priority).
-/// Waits for any high-priority Whisper download to complete first.
+/// Waits for any higher-priority downloads to complete first.
 fn spawn_m2m100_download(model: M2M100Model) {
     tokio::spawn(async move {
-        // Wait for Whisper download to complete if in progress
-        if WHISPER_DOWNLOADING.load(Ordering::SeqCst) {
-            info!("M2M-100 download queued (waiting for Whisper download to complete)...");
-            while WHISPER_DOWNLOADING.load(Ordering::SeqCst) {
-                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-            }
-            info!("Whisper download complete. Starting M2M-100 download...");
-        }
+        // Acquire low-priority download slot (waits for high/medium priority downloads)
+        info!("M2M-100 download queued (low priority)...");
+        let _guard = acquire_download_slot(DownloadPriority::Low).await;
 
         info!("Background download started for M2M-100 {}", model.name());
 
@@ -344,6 +334,8 @@ fn spawn_m2m100_download(model: M2M100Model) {
             }
         })
         .await;
+
+        // Guard dropped here, releasing the download slot
 
         match result {
             Ok(path) => {

@@ -12,6 +12,7 @@ mod daemon;
 mod dbus;
 #[cfg(feature = "diarization")]
 mod diarization;
+mod download_queue;
 mod engine;
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 mod gui;

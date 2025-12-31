@@ -9,6 +9,7 @@ pub mod correction;
 pub mod daemon;
 #[cfg(target_os = "linux")]
 pub mod dbus;
+pub mod download_queue;
 pub mod engine;
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 pub mod gui;
