@@ -23,7 +23,6 @@ mod output;
 mod panic_handler;
 mod platform;
 mod queue;
-#[cfg(target_os = "linux")]
 mod recording;
 mod secrets;
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
