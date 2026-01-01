@@ -156,8 +156,8 @@ wasapi = "0.22"
 tray-icon = "0.19"
 # macOS accessibility permission checking
 macos-accessibility-client = "0.0.1"
-# macOS system audio capture (ScreenCaptureKit, macOS 13+)
-screencapturekit = "1.5"
+# NOTE: screencapturekit crate available but not yet integrated
+# See src/input/system_audio_macos.rs for implementation notes
 
 [dev-dependencies]
 tempfile = "3"
