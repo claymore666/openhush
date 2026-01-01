@@ -2,25 +2,39 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <!-- Enable App Sandbox for Mac App Store and security -->
+    <key>com.apple.security.app-sandbox</key>
+    <true/>
+
     <!-- Allow microphone access for audio recording -->
     <key>com.apple.security.device.audio-input</key>
     <true/>
 
-    <!-- Allow accessibility for keyboard simulation -->
+    <!-- Screen Recording permission for system audio capture -->
+    <key>com.apple.security.device.screen-capture</key>
+    <true/>
+
+    <!-- Allow accessibility for keyboard simulation and hotkeys -->
     <key>com.apple.security.automation.apple-events</key>
     <true/>
 
-    <!-- Allow network access for model downloads -->
+    <!-- Allow network access for model downloads and Ollama API -->
     <key>com.apple.security.network.client</key>
     <true/>
 
-    <!-- Allow reading/writing user data -->
+    <!-- Allow reading/writing user data (config, models) -->
     <key>com.apple.security.files.user-selected.read-write</key>
     <true/>
 
+    <!-- Access to Downloads folder for model storage -->
+    <key>com.apple.security.files.downloads.read-write</key>
+    <true/>
+
     <!-- Hardened runtime exceptions -->
+    <!-- Required for Whisper/ONNX runtime JIT compilation -->
     <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
     <true/>
+    <!-- Required for loading dynamic libraries (ONNX, etc.) -->
     <key>com.apple.security.cs.disable-library-validation</key>
     <true/>
 </dict>
