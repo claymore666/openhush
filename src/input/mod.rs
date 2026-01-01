@@ -7,6 +7,8 @@ pub mod ring_buffer;
 pub mod system_audio;
 #[cfg(target_os = "macos")]
 pub mod system_audio_macos;
+#[cfg(target_os = "windows")]
+pub mod system_audio_windows;
 pub mod wake_word;
 
 #[allow(unused_imports)]
@@ -21,6 +23,9 @@ pub use system_audio::{AudioSource, SourceInfo, SystemAudioCapture, SystemAudioE
 #[allow(unused_imports)]
 #[cfg(target_os = "macos")]
 pub use system_audio_macos::{AudioSource, SourceInfo, SystemAudioCapture, SystemAudioError};
+#[allow(unused_imports)]
+#[cfg(target_os = "windows")]
+pub use system_audio_windows::{AudioSource, SourceInfo, SystemAudioCapture, SystemAudioError};
 
 use serde::{Deserialize, Serialize};
 
