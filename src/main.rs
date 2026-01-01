@@ -139,7 +139,6 @@ enum Commands {
     },
 
     /// Record and transcribe audio (system audio or microphone)
-    #[cfg(target_os = "linux")]
     Record {
         /// Audio source: mic, monitor (system audio), or both
         #[arg(short, long, default_value = "mic")]
@@ -1052,7 +1051,6 @@ async fn async_main(cli: Cli) -> anyhow::Result<()> {
             }
         }
 
-        #[cfg(target_os = "linux")]
         Commands::Record {
             source,
             output,

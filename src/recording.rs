@@ -12,8 +12,8 @@ use crate::config::Config;
 #[cfg(feature = "diarization")]
 use crate::diarization::{DiarizationConfig, DiarizationEngine, DiarizationError};
 use crate::engine::whisper::{WhisperEngine, WhisperError, WhisperModel};
-use crate::input::system_audio::{AudioSource, SystemAudioCapture, SystemAudioError};
 use crate::input::{AudioBuffer, AudioRecorder, AudioRecorderError};
+use crate::input::{AudioSource, SystemAudioCapture, SystemAudioError};
 use crate::vad::silero::SileroVad;
 use crate::vad::VadConfig;
 use std::fs::File;
