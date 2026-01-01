@@ -5,6 +5,8 @@ pub mod hotkey;
 pub mod ring_buffer;
 #[cfg(target_os = "linux")]
 pub mod system_audio;
+#[cfg(target_os = "macos")]
+pub mod system_audio_macos;
 pub mod wake_word;
 
 #[allow(unused_imports)]
@@ -16,6 +18,9 @@ pub use ring_buffer::AudioRingBuffer;
 #[allow(unused_imports)]
 #[cfg(target_os = "linux")]
 pub use system_audio::{AudioSource, SourceInfo, SystemAudioCapture, SystemAudioError};
+#[allow(unused_imports)]
+#[cfg(target_os = "macos")]
+pub use system_audio_macos::{AudioSource, SourceInfo, SystemAudioCapture, SystemAudioError};
 
 use serde::{Deserialize, Serialize};
 
