@@ -161,26 +161,66 @@ impl DiarizationEngine {
         Ok(())
     }
 
-    /// Download a model file
+    /// Download a model file with resume support
     async fn download_model(url: &str, path: &Path) -> Result<(), DiarizationError> {
         use futures_util::StreamExt;
         use std::io::Write;
 
-        let response = reqwest::get(url)
+        let temp_path = path.with_extension("tmp");
+
+        // Check for existing partial download to resume
+        let resume_from = if temp_path.exists() {
+            std::fs::metadata(&temp_path).map(|m| m.len()).unwrap_or(0)
+        } else {
+            0
+        };
+
+        let client = reqwest::Client::new();
+        let mut request = client.get(url);
+        if resume_from > 0 {
+            request = request.header("Range", format!("bytes={}-", resume_from));
+            info!("Resuming download from byte {}", resume_from);
+        }
+
+        let response = request
+            .send()
             .await
             .map_err(|e| DiarizationError::DownloadFailed(e.to_string()))?;
 
-        if !response.status().is_success() {
+        let status = response.status();
+        let is_partial = status == reqwest::StatusCode::PARTIAL_CONTENT;
+
+        if !status.is_success() && !is_partial {
             return Err(DiarizationError::DownloadFailed(format!(
                 "HTTP {}: {}",
-                response.status(),
-                url
+                status, url
             )));
         }
 
-        let total_size = response.content_length().unwrap_or(0);
-        let mut downloaded: u64 = 0;
-        let mut file = std::fs::File::create(path)?;
+        // Calculate total size
+        let total_size = if is_partial {
+            response
+                .headers()
+                .get("content-range")
+                .and_then(|h| h.to_str().ok())
+                .and_then(|s| s.split('/').next_back())
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(resume_from + response.content_length().unwrap_or(0))
+        } else {
+            response.content_length().unwrap_or(0)
+        };
+
+        // Open file for writing (append if resuming, create if new)
+        let mut file = if resume_from > 0 && is_partial {
+            std::fs::OpenOptions::new().append(true).open(&temp_path)?
+        } else {
+            if resume_from > 0 {
+                let _ = std::fs::remove_file(&temp_path);
+            }
+            std::fs::File::create(&temp_path)?
+        };
+
+        let mut downloaded: u64 = resume_from;
         let mut stream = response.bytes_stream();
 
         while let Some(chunk) = stream.next().await {
@@ -193,6 +233,9 @@ impl DiarizationEngine {
                 debug!("Download progress: {}%", percent);
             }
         }
+
+        // Rename temp to final
+        std::fs::rename(&temp_path, path)?;
 
         info!("Downloaded: {}", path.display());
         Ok(())

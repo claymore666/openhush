@@ -193,16 +193,35 @@ where
             continue;
         }
 
-        info!("Downloading {} from {}", filename, url);
+        // Check for existing partial download to resume
+        let resume_from = if temp_path.exists() {
+            std::fs::metadata(&temp_path).map(|m| m.len()).unwrap_or(0)
+        } else {
+            0
+        };
 
-        let response =
-            client.get(&url).send().await.map_err(|e| {
-                M2M100Error::Inference(format!("Download {} failed: {}", filename, e))
-            })?;
+        if resume_from > 0 {
+            info!("Resuming {} download from byte {}", filename, resume_from);
+        } else {
+            info!("Downloading {} from {}", filename, url);
+        }
 
-        if !response.status().is_success() {
+        let mut request = client.get(&url);
+        if resume_from > 0 {
+            request = request.header("Range", format!("bytes={}-", resume_from));
+        }
+
+        let response = request
+            .send()
+            .await
+            .map_err(|e| M2M100Error::Inference(format!("Download {} failed: {}", filename, e)))?;
+
+        let status = response.status();
+        let is_partial = status == reqwest::StatusCode::PARTIAL_CONTENT;
+
+        if !status.is_success() && !is_partial {
             // Check if this is a 404 - model might not be available
-            if response.status().as_u16() == 404 {
+            if status.as_u16() == 404 {
                 // Clean up any partial downloads
                 let _ = std::fs::remove_dir_all(&dir);
                 return Err(M2M100Error::Inference(format!(
@@ -219,22 +238,48 @@ where
             }
             return Err(M2M100Error::Inference(format!(
                 "Download {} failed with status: {}",
-                filename,
-                response.status()
+                filename, status
             )));
         }
 
-        let total_size = response.content_length().unwrap_or(0);
+        // Calculate total size
+        let total_size = if is_partial {
+            response
+                .headers()
+                .get("content-range")
+                .and_then(|h| h.to_str().ok())
+                .and_then(|s| s.split('/').next_back())
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(resume_from + response.content_length().unwrap_or(0))
+        } else {
+            response.content_length().unwrap_or(0)
+        };
 
-        // Stream to temp file
-        let mut file = std::fs::File::create(&temp_path)
-            .map_err(|e| M2M100Error::Inference(format!("Cannot create temp file: {}", e)))?;
+        // Open file for writing (append if resuming, create if new)
+        let mut file = if resume_from > 0 && is_partial {
+            std::fs::OpenOptions::new()
+                .append(true)
+                .open(&temp_path)
+                .map_err(|e| M2M100Error::Inference(format!("Cannot open temp file: {}", e)))?
+        } else {
+            if resume_from > 0 {
+                // Server returned 200 OK instead of 206 Partial, start fresh
+                let _ = std::fs::remove_file(&temp_path);
+            }
+            std::fs::File::create(&temp_path)
+                .map_err(|e| M2M100Error::Inference(format!("Cannot create temp file: {}", e)))?
+        };
 
-        let mut downloaded: u64 = 0;
+        let mut downloaded: u64 = resume_from;
         let mut stream = response.bytes_stream();
 
         use futures_util::StreamExt;
         use std::io::Write;
+
+        // Report initial progress if resuming
+        if resume_from > 0 {
+            progress_callback(filename, downloaded, total_size);
+        }
 
         while let Some(chunk) = stream.next().await {
             let chunk =

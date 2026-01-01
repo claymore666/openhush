@@ -236,25 +236,56 @@ impl WakeWordDetector {
         use futures_util::StreamExt;
         use std::io::Write;
 
-        let response = reqwest::get(url)
+        let temp_path = path.with_extension("tmp");
+
+        // Check for existing partial download to resume
+        let resume_from = if temp_path.exists() {
+            std::fs::metadata(&temp_path).map(|m| m.len()).unwrap_or(0)
+        } else {
+            0
+        };
+
+        let client = reqwest::Client::new();
+        let mut request = client.get(url);
+        if resume_from > 0 {
+            request = request.header("Range", format!("bytes={}-", resume_from));
+            tracing::info!("Resuming download from byte {}", resume_from);
+        }
+
+        let response = request
+            .send()
             .await
             .map_err(|e| WakeWordError::ModelError(format!("Download failed: {}", e)))?;
 
-        if !response.status().is_success() {
+        let status = response.status();
+        let is_partial = status == reqwest::StatusCode::PARTIAL_CONTENT;
+
+        if !status.is_success() && !is_partial {
             return Err(WakeWordError::ModelError(format!(
                 "HTTP {}: {}",
-                response.status(),
-                url
+                status, url
             )));
         }
 
-        let mut file = std::fs::File::create(path)?;
+        // Open file for writing (append if resuming, create if new)
+        let mut file = if resume_from > 0 && is_partial {
+            std::fs::OpenOptions::new().append(true).open(&temp_path)?
+        } else {
+            if resume_from > 0 {
+                let _ = std::fs::remove_file(&temp_path);
+            }
+            std::fs::File::create(&temp_path)?
+        };
+
         let mut stream = response.bytes_stream();
 
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(|e| WakeWordError::ModelError(e.to_string()))?;
             file.write_all(&chunk)?;
         }
+
+        // Rename temp to final
+        std::fs::rename(&temp_path, path)?;
 
         Ok(())
     }

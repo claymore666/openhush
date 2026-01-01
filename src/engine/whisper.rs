@@ -460,6 +460,9 @@ pub async fn download_model<F>(
 where
     F: FnMut(u64, u64), // (downloaded, total)
 {
+    use futures_util::StreamExt;
+    use std::io::Write;
+
     let dir = models_dir()?;
     std::fs::create_dir_all(&dir)
         .map_err(|e| WhisperError::LoadFailed(format!("Cannot create models dir: {}", e)))?;
@@ -479,30 +482,95 @@ where
     let url = model.download_url();
     let client = reqwest::Client::new();
 
-    let response = client
-        .get(&url)
+    // Check for existing partial download to resume
+    let resume_from = if temp_path.exists() {
+        match std::fs::metadata(&temp_path) {
+            Ok(meta) => {
+                let size = meta.len();
+                if size > 0 {
+                    info!(
+                        "Resuming download from byte {} for {}",
+                        size,
+                        model.filename()
+                    );
+                    size
+                } else {
+                    0
+                }
+            }
+            Err(_) => 0,
+        }
+    } else {
+        0
+    };
+
+    // Build request with Range header if resuming
+    let mut request = client.get(&url);
+    if resume_from > 0 {
+        request = request.header("Range", format!("bytes={}-", resume_from));
+    }
+
+    let response = request
         .send()
         .await
         .map_err(|e| WhisperError::LoadFailed(format!("Download failed: {}", e)))?;
 
-    if !response.status().is_success() {
+    // Check response status
+    let status = response.status();
+    let is_partial = status == reqwest::StatusCode::PARTIAL_CONTENT;
+    let is_success = status.is_success();
+
+    if !is_success && !is_partial {
+        // If we tried to resume but server doesn't support Range, start fresh
+        if resume_from > 0 && status == reqwest::StatusCode::OK {
+            warn!("Server doesn't support resume, starting fresh download");
+            // Remove partial file and retry without resume
+            let _ = std::fs::remove_file(&temp_path);
+            return Box::pin(download_model(model, progress_callback)).await;
+        }
         return Err(WhisperError::LoadFailed(format!(
             "Download failed with status: {}",
-            response.status()
+            status
         )));
     }
 
-    let total_size = response.content_length().unwrap_or(model_size_bytes(model));
+    // Calculate total size
+    let total_size = if is_partial {
+        // For partial content, get total from Content-Range header
+        response
+            .headers()
+            .get("content-range")
+            .and_then(|h| h.to_str().ok())
+            .and_then(|s| s.split('/').next_back())
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(resume_from + response.content_length().unwrap_or(0))
+    } else {
+        response.content_length().unwrap_or(model_size_bytes(model))
+    };
 
-    // Stream to temp file
-    let mut file = std::fs::File::create(&temp_path)
-        .map_err(|e| WhisperError::LoadFailed(format!("Cannot create temp file: {}", e)))?;
+    // Open file for writing (append if resuming, create if new)
+    let mut file = if resume_from > 0 && is_partial {
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&temp_path)
+            .map_err(|e| WhisperError::LoadFailed(format!("Cannot open temp file: {}", e)))?
+    } else {
+        // Fresh download - create new file
+        if resume_from > 0 {
+            // Server returned 200 OK instead of 206 Partial, start fresh
+            let _ = std::fs::remove_file(&temp_path);
+        }
+        std::fs::File::create(&temp_path)
+            .map_err(|e| WhisperError::LoadFailed(format!("Cannot create temp file: {}", e)))?
+    };
 
-    let mut downloaded: u64 = 0;
+    let mut downloaded: u64 = resume_from;
     let mut stream = response.bytes_stream();
 
-    use futures_util::StreamExt;
-    use std::io::Write;
+    // Report initial progress if resuming
+    if resume_from > 0 {
+        progress_callback(downloaded, total_size);
+    }
 
     while let Some(chunk) = stream.next().await {
         let chunk =
@@ -513,10 +581,19 @@ where
         progress_callback(downloaded, total_size);
     }
 
+    // Verify download completed
+    if downloaded < total_size {
+        return Err(WhisperError::LoadFailed(format!(
+            "Download incomplete: {} of {} bytes",
+            downloaded, total_size
+        )));
+    }
+
     // Rename temp to final
     std::fs::rename(&temp_path, &dest_path)
         .map_err(|e| WhisperError::LoadFailed(format!("Cannot rename temp file: {}", e)))?;
 
+    info!("Download complete: {}", dest_path.display());
     Ok(dest_path)
 }
 
