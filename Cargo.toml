@@ -148,16 +148,16 @@ winit = { version = "0.30", default-features = false, features = ["rwh_06"] }
 windows-sys = { version = "0.59", features = ["Win32_System_Console", "Win32_UI_WindowsAndMessaging", "Win32_Foundation"] }
 # Windows registry access for autostart
 winreg = "0.55"
-# NOTE: wasapi crate available for WASAPI loopback but not yet integrated
-# See src/input/system_audio_windows.rs for implementation notes
+# Windows system audio capture (WASAPI loopback)
+wasapi = "0.22"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Cross-platform system tray
 tray-icon = "0.19"
 # macOS accessibility permission checking
 macos-accessibility-client = "0.0.1"
-# NOTE: screencapturekit crate available but not yet integrated
-# See src/input/system_audio_macos.rs for implementation notes
+# macOS system audio capture (ScreenCaptureKit, macOS 13+)
+screencapturekit = "1.5"
 
 [dev-dependencies]
 tempfile = "3"
