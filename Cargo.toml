@@ -72,6 +72,9 @@ toml = "0.8"
 # Base64 encoding for actions
 base64 = "0.22"
 
+# Safe transmutation for audio buffer handling
+bytemuck = "1.14"
+
 # Secure secret storage (platform keyrings)
 keyring = "3"
 rpassword = "7"
