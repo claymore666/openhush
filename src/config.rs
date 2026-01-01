@@ -908,6 +908,11 @@ pub struct GpuConfig {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AudioConfig {
+    /// Input device ID. If not set, uses system default.
+    /// Use `openhush device list` to see available devices.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_device: Option<String>,
+
     /// Duration of the always-on audio ring buffer in seconds.
     /// This enables instant recording with no startup delay.
     /// Higher values use more memory (~2MB per 30 seconds at 16kHz).
@@ -921,8 +926,8 @@ pub struct AudioConfig {
 
     /// Channel selection for multi-channel audio sources.
     /// - "all": capture all channels and mix to mono (default)
-    /// - \[0\]: capture only channel 0
-    /// - \[0, 1\]: capture channels 0 and 1, mix to mono
+    /// - [0]: capture only channel 0
+    /// - [0, 1]: capture channels 0 and 1, mix to mono
     #[serde(default)]
     pub channels: ChannelSelection,
 
@@ -950,6 +955,7 @@ pub struct AudioConfig {
 impl Default for AudioConfig {
     fn default() -> Self {
         Self {
+            input_device: None,
             prebuffer_duration_secs: default_prebuffer_duration(),
             resampling_quality: ResamplingQuality::default(),
             channels: ChannelSelection::default(),

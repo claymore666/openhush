@@ -38,6 +38,9 @@ pub enum AudioRecorderError {
     #[error("No audio input device found")]
     NoInputDevice,
 
+    #[error("Audio device not found: {0}")]
+    DeviceNotFound(String),
+
     #[error("Failed to get default input config: {0}")]
     NoInputConfig(String),
 
@@ -476,7 +479,7 @@ impl AudioRecorder {
         prebuffer_secs: f32,
         resampling_quality: ResamplingQuality,
     ) -> Result<Self, AudioRecorderError> {
-        Self::new_always_on_with_channels(prebuffer_secs, resampling_quality, ChannelMix::All)
+        Self::new_always_on_with_device(prebuffer_secs, resampling_quality, ChannelMix::All, None)
     }
 
     /// Create a new always-on audio recorder with channel selection.
@@ -485,16 +488,36 @@ impl AudioRecorder {
     /// * `prebuffer_secs` - Duration of audio to buffer (e.g., 30.0 seconds)
     /// * `resampling_quality` - Quality of audio resampling (low=linear, high=sinc)
     /// * `channel_mix` - Which channels to mix for output
+    #[allow(dead_code)]
     pub fn new_always_on_with_channels(
         prebuffer_secs: f32,
         resampling_quality: ResamplingQuality,
         channel_mix: ChannelMix,
     ) -> Result<Self, AudioRecorderError> {
+        Self::new_always_on_with_device(prebuffer_secs, resampling_quality, channel_mix, None)
+    }
+
+    /// Create a new always-on audio recorder with device and channel selection.
+    ///
+    /// # Arguments
+    /// * `prebuffer_secs` - Duration of audio to buffer (e.g., 30.0 seconds)
+    /// * `resampling_quality` - Quality of audio resampling (low=linear, high=sinc)
+    /// * `channel_mix` - Which channels to mix for output
+    /// * `device_id` - Optional device ID to use (None = system default)
+    pub fn new_always_on_with_device(
+        prebuffer_secs: f32,
+        resampling_quality: ResamplingQuality,
+        channel_mix: ChannelMix,
+        device_id: Option<&str>,
+    ) -> Result<Self, AudioRecorderError> {
         let host = cpal::default_host();
 
-        let device = host
-            .default_input_device()
-            .ok_or(AudioRecorderError::NoInputDevice)?;
+        let device = if let Some(id) = device_id {
+            Self::find_device_by_id(&host, id)?
+        } else {
+            host.default_input_device()
+                .ok_or(AudioRecorderError::NoInputDevice)?
+        };
 
         let device_name = device
             .description()
@@ -599,6 +622,31 @@ impl AudioRecorder {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    /// Find an audio input device by ID.
+    fn find_device_by_id(host: &cpal::Host, device_id: &str) -> Result<Device, AudioRecorderError> {
+        use cpal::traits::HostTrait;
+
+        let devices = host
+            .input_devices()
+            .map_err(|e| AudioRecorderError::DeviceNotFound(e.to_string()))?;
+
+        for device in devices {
+            if let Ok(id) = device.id() {
+                if id.to_string() == device_id {
+                    return Ok(device);
+                }
+            }
+            // Also match by device name for convenience
+            if let Ok(desc) = device.description() {
+                if desc.name() == device_id {
+                    return Ok(device);
+                }
+            }
+        }
+
+        Err(AudioRecorderError::DeviceNotFound(device_id.to_string()))
     }
 
     /// Mark the current position in the ring buffer.

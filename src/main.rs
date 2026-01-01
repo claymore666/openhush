@@ -118,6 +118,12 @@ enum Commands {
         action: ModelAction,
     },
 
+    /// Manage audio input devices
+    Device {
+        #[command(subcommand)]
+        action: DeviceAction,
+    },
+
     /// One-shot transcription from file
     Transcribe {
         /// Audio file to transcribe
@@ -314,6 +320,28 @@ enum ModelAction {
 
     /// Unload model from GPU memory (requires running daemon)
     Unload,
+}
+
+#[derive(Subcommand)]
+enum DeviceAction {
+    /// List available audio input devices
+    List {
+        /// Output format (text, json)
+        #[arg(short, long, default_value = "text")]
+        format: String,
+    },
+
+    /// Set the input device
+    Set {
+        /// Device ID (use `device list` to see available devices)
+        id: String,
+    },
+
+    /// Set channel selection for a device
+    Channels {
+        /// Channel selection: "all" or comma-separated indices (e.g., "0,1")
+        selection: String,
+    },
 }
 
 /// Guard that must be kept alive for file logging to work
@@ -838,6 +866,82 @@ async fn async_main(cli: Cli) -> anyhow::Result<()> {
                             eprintln!("Failed to unload model: {}", e);
                             std::process::exit(1);
                         }
+                    }
+                }
+            }
+        },
+
+        Commands::Device { action } => match action {
+            DeviceAction::List { format } => {
+                let devices = input::enumerate_audio_inputs();
+
+                if format == "json" {
+                    let json = serde_json::to_string_pretty(&devices)
+                        .map_err(|e| anyhow::anyhow!("JSON error: {}", e))?;
+                    println!("{}", json);
+                } else {
+                    println!("Audio input devices:\n");
+                    println!("  {:<40} {:<12} {:<10} Default", "Name", "Type", "Channels");
+                    println!("  {}", "-".repeat(75));
+
+                    for device in &devices {
+                        let type_str = match device.device_type {
+                            input::AudioDeviceType::Microphone => "mic",
+                            input::AudioDeviceType::Monitor => "monitor",
+                        };
+                        let default_str = if device.is_default { "✓" } else { "" };
+                        let channels = device.channel_names.join(", ");
+                        println!(
+                            "  {:<40} {:<12} {:<10} {}",
+                            if device.name.len() > 38 {
+                                format!("{}...", &device.name[..35])
+                            } else {
+                                device.name.clone()
+                            },
+                            type_str,
+                            format!("{} ({})", device.channel_count, channels),
+                            default_str
+                        );
+                    }
+
+                    println!("\n  Device IDs (for config):");
+                    for device in &devices {
+                        println!("    {}", device.id);
+                    }
+
+                    println!("\n  To set input device:");
+                    println!("    openhush device set <device_id>");
+                }
+            }
+            DeviceAction::Set { id } => {
+                let mut config = config::Config::load().unwrap_or_default();
+
+                // Verify device exists
+                let devices = input::enumerate_audio_inputs();
+                if !devices.iter().any(|d| d.id == id) {
+                    eprintln!("Device not found: {}", id);
+                    eprintln!("Use `openhush device list` to see available devices.");
+                    std::process::exit(1);
+                }
+
+                config.audio.input_device = Some(id.clone());
+                config.save()?;
+                println!("Input device set to: {}", id);
+            }
+            DeviceAction::Channels { selection } => {
+                let channels = config::ChannelSelection::from_cli_arg(&selection)
+                    .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+                let mut config = config::Config::load().unwrap_or_default();
+                config.audio.channels = channels.clone();
+                config.save()?;
+
+                match channels {
+                    config::ChannelSelection::All => {
+                        println!("Channel selection set to: all");
+                    }
+                    config::ChannelSelection::Select(indices) => {
+                        println!("Channel selection set to: {:?}", indices);
                     }
                 }
             }

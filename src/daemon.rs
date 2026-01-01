@@ -1060,10 +1060,11 @@ impl Daemon {
                 crate::input::ChannelMix::Select(channels.clone())
             }
         };
-        let audio_recorder = AudioRecorder::new_always_on_with_channels(
+        let audio_recorder = AudioRecorder::new_always_on_with_device(
             prebuffer_secs,
             resampling_quality,
             channel_mix,
+            self.config.audio.input_device.as_deref(),
         )?;
         info!(
             "Always-on audio capture initialized ({:.0}s ring buffer, {:?} resampling)",
