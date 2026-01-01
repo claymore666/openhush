@@ -5,12 +5,13 @@
 
 #![allow(dead_code)]
 
+use std::collections::VecDeque;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
-use wasapi::{AudioClient, DeviceCollection, Direction, ShareMode, WaveFormat};
+use wasapi::{Direction, ShareMode, WaveFormat};
 
 /// Target sample rate for Whisper (16kHz)
 pub const SAMPLE_RATE: u32 = 16000;
@@ -100,30 +101,9 @@ impl SystemAudioCapture {
         // Initialize WASAPI
         wasapi::initialize_mta().map_err(|e| SystemAudioError::InitFailed(e.to_string()))?;
 
-        // Get the device to capture from
-        let devices = DeviceCollection::new(&Direction::Render)
-            .map_err(|e| SystemAudioError::InitFailed(e.to_string()))?;
-
-        let device = if let Some(name) = device_name {
-            // Find device by name
-            let mut found = None;
-            for i in 0..devices.get_nbr_devices().unwrap_or(0) {
-                if let Ok(dev) = devices.get_device_at_index(i) {
-                    if let Ok(dev_name) = dev.get_friendlyname() {
-                        if dev_name.contains(name) {
-                            found = Some(dev);
-                            break;
-                        }
-                    }
-                }
-            }
-            found.ok_or(SystemAudioError::NoOutputDevice)?
-        } else {
-            // Use default render device
-            devices
-                .get_device_at_index(0)
-                .map_err(|e| SystemAudioError::NoOutputDevice)?
-        };
+        // Get the default render device for loopback
+        let device = wasapi::get_default_device(&Direction::Render)
+            .map_err(|e| SystemAudioError::NoOutputDevice)?;
 
         let device_friendly_name = device
             .get_friendlyname()
@@ -131,7 +111,6 @@ impl SystemAudioCapture {
 
         let (shutdown_tx, shutdown_rx) = mpsc::channel();
 
-        let device_name_for_thread = device_friendly_name.clone();
         let thread_handle = thread::spawn(move || {
             if let Err(e) = run_capture_loop(device, samples_clone, shutdown_rx) {
                 error!("WASAPI capture error: {}", e);
@@ -188,33 +167,29 @@ fn run_capture_loop(
     samples: Arc<Mutex<Vec<f32>>>,
     shutdown_rx: mpsc::Receiver<()>,
 ) -> Result<(), SystemAudioError> {
+    use wasapi::SampleType;
+
     // Create audio client for loopback capture
-    let audio_client = device
+    let mut audio_client = device
         .get_iaudioclient()
         .map_err(|e| SystemAudioError::StreamFailed(e.to_string()))?;
 
-    // Get the mix format (what the device is using)
-    let wave_format = audio_client
-        .get_mixformat()
+    // Get the device format
+    let device_format = device
+        .get_device_format()
         .map_err(|e| SystemAudioError::StreamFailed(e.to_string()))?;
 
-    let device_sample_rate = wave_format.get_samplespersec();
-    let device_channels = wave_format.get_nchannels();
+    let device_sample_rate = device_format.get_samplespersec();
+    let device_channels = device_format.get_nchannels();
 
     debug!(
         "Device format: {} Hz, {} channels",
         device_sample_rate, device_channels
     );
 
-    // Initialize for loopback capture
+    // Initialize for loopback capture (shared mode with events)
     audio_client
-        .initialize_client(
-            &wave_format,
-            100_000_000, // 10 second buffer (in 100-nanosecond units)
-            &Direction::Capture,
-            &ShareMode::Shared,
-            true, // Enable loopback
-        )
+        .initialize_client(&device_format, &Direction::Capture, &ShareMode::Shared)
         .map_err(|e| SystemAudioError::StreamFailed(e.to_string()))?;
 
     // Get capture client
@@ -228,6 +203,7 @@ fn run_capture_loop(
         .map_err(|e| SystemAudioError::CaptureError(e.to_string()))?;
 
     let resampler_ratio = SAMPLE_RATE as f32 / device_sample_rate as f32;
+    let mut capture_buffer: VecDeque<u8> = VecDeque::new();
 
     loop {
         // Check for shutdown signal
@@ -235,21 +211,25 @@ fn run_capture_loop(
             break;
         }
 
-        // Read available data
-        match capture_client.read_from_device_to_deque(100) {
-            Ok((_frames, data)) => {
-                if !data.is_empty() {
-                    // Convert to f32 samples
-                    let float_samples: Vec<f32> = data
-                        .iter()
-                        .map(|&sample| sample as f32 / i16::MAX as f32)
-                        .collect();
+        // Read available data into the deque
+        match capture_client.read_from_device_to_deque(&mut capture_buffer) {
+            Ok(_buffer_info) => {
+                if !capture_buffer.is_empty() {
+                    // Convert bytes to f32 samples based on format
+                    let float_samples = bytes_to_f32_samples(&capture_buffer, &device_format);
+                    capture_buffer.clear();
 
                     // Mix to mono if stereo
                     let mono_samples = if device_channels == 2 {
                         float_samples
                             .chunks(2)
-                            .map(|chunk| (chunk[0] + chunk[1]) / 2.0)
+                            .map(|chunk| {
+                                if chunk.len() == 2 {
+                                    (chunk[0] + chunk[1]) / 2.0
+                                } else {
+                                    chunk[0]
+                                }
+                            })
                             .collect::<Vec<_>>()
                     } else {
                         float_samples
@@ -265,12 +245,11 @@ fn run_capture_loop(
             }
             Err(e) => {
                 warn!("Capture read error: {:?}", e);
-                thread::sleep(std::time::Duration::from_millis(10));
             }
         }
 
         // Small sleep to prevent busy loop
-        thread::sleep(std::time::Duration::from_millis(5));
+        thread::sleep(std::time::Duration::from_millis(10));
     }
 
     audio_client
@@ -278,6 +257,58 @@ fn run_capture_loop(
         .map_err(|e| SystemAudioError::CaptureError(e.to_string()))?;
 
     Ok(())
+}
+
+/// Convert raw bytes to f32 samples based on wave format.
+fn bytes_to_f32_samples(bytes: &VecDeque<u8>, format: &WaveFormat) -> Vec<f32> {
+    let bytes_vec: Vec<u8> = bytes.iter().copied().collect();
+    let bits_per_sample = format.get_bitspersample();
+
+    match bits_per_sample {
+        16 => {
+            // 16-bit signed integer
+            bytes_vec
+                .chunks_exact(2)
+                .map(|chunk| {
+                    let sample = i16::from_le_bytes([chunk[0], chunk[1]]);
+                    sample as f32 / i16::MAX as f32
+                })
+                .collect()
+        }
+        24 => {
+            // 24-bit signed integer
+            bytes_vec
+                .chunks_exact(3)
+                .map(|chunk| {
+                    let sample = i32::from_le_bytes([chunk[0], chunk[1], chunk[2], 0]) >> 8;
+                    sample as f32 / (1 << 23) as f32
+                })
+                .collect()
+        }
+        32 => {
+            // 32-bit float or int
+            if format.get_validbitspersample() == 32 {
+                // Float
+                bytes_vec
+                    .chunks_exact(4)
+                    .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+                    .collect()
+            } else {
+                // Integer
+                bytes_vec
+                    .chunks_exact(4)
+                    .map(|chunk| {
+                        let sample = i32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                        sample as f32 / i32::MAX as f32
+                    })
+                    .collect()
+            }
+        }
+        _ => {
+            warn!("Unsupported bit depth: {}", bits_per_sample);
+            Vec::new()
+        }
+    }
 }
 
 /// Simple linear resampling.
@@ -312,7 +343,7 @@ fn resample_linear(samples: &[f32], ratio: f32) -> Vec<f32> {
 pub fn list_monitor_sources() -> Result<Vec<SourceInfo>, SystemAudioError> {
     wasapi::initialize_mta().map_err(|e| SystemAudioError::InitFailed(e.to_string()))?;
 
-    let devices = DeviceCollection::new(&Direction::Render)
+    let devices = wasapi::DeviceCollection::new(&Direction::Render)
         .map_err(|e| SystemAudioError::InitFailed(e.to_string()))?;
 
     let mut sources = Vec::new();
@@ -326,12 +357,8 @@ pub fn list_monitor_sources() -> Result<Vec<SourceInfo>, SystemAudioError> {
                 .unwrap_or_else(|_| "Unknown Device".to_string());
 
             // Get device format for sample rate and channels
-            let (sample_rate, channels) = if let Ok(client) = device.get_iaudioclient() {
-                if let Ok(format) = client.get_mixformat() {
-                    (format.get_samplespersec(), format.get_nchannels() as u8)
-                } else {
-                    (48000, 2)
-                }
+            let (sample_rate, channels) = if let Ok(format) = device.get_device_format() {
+                (format.get_samplespersec(), format.get_nchannels() as u8)
             } else {
                 (48000, 2)
             };

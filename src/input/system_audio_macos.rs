@@ -1,19 +1,14 @@
 //! System audio capture using ScreenCaptureKit on macOS 13+.
 //!
 //! Captures desktop audio (meetings, calls, media) via Apple's ScreenCaptureKit framework.
-//! Requires macOS 13 (Ventura) or later.
+//! Requires macOS 13 (Ventura) or later and Screen Recording permission.
 
 #![allow(dead_code)]
 
-use screencapturekit::{
-    sc_content_filter::SCContentFilter, sc_error::SCStreamError,
-    sc_output_type::SCStreamOutputType, sc_shareable_content::SCShareableContent,
-    sc_stream::SCStream, sc_stream_configuration::SCStreamConfiguration,
-    sc_stream_output::StreamOutput,
-};
+use screencapturekit::prelude::*;
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 /// Target sample rate for Whisper (16kHz)
 pub const SAMPLE_RATE: u32 = 16000;
@@ -85,28 +80,23 @@ struct AudioHandler {
     samples: Arc<Mutex<Vec<f32>>>,
 }
 
-impl StreamOutput for AudioHandler {
-    fn did_output_sample_buffer(
-        &self,
-        sample_buffer: screencapturekit::cm_sample_buffer::CMSampleBuffer,
-        of_type: SCStreamOutputType,
-    ) {
+impl SCStreamOutputTrait for AudioHandler {
+    fn did_output_sample_buffer(&self, sample: CMSampleBuffer, of_type: SCStreamOutputType) {
         if of_type != SCStreamOutputType::Audio {
             return;
         }
 
-        // Extract audio samples from the CMSampleBuffer
-        if let Some(audio_buffer) = sample_buffer.get_audio_buffer_list() {
-            let mut samples = self.samples.lock().unwrap();
+        // Get audio buffer from sample
+        if let Some(block_buffer) = sample.get_data_buffer() {
+            if let Some(data) = block_buffer.get_data_bytes() {
+                // Audio is typically float32 samples
+                let float_samples: Vec<f32> = data
+                    .chunks_exact(4)
+                    .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+                    .collect();
 
-            // Process each audio buffer
-            for buffer in audio_buffer.buffers() {
-                if let Some(data) = buffer.data() {
-                    // Convert bytes to f32 samples
-                    // ScreenCaptureKit typically outputs 32-bit float samples
-                    let float_samples: &[f32] = bytemuck::cast_slice(data);
-                    samples.extend_from_slice(float_samples);
-                }
+                let mut samples = self.samples.lock().unwrap();
+                samples.extend(float_samples);
             }
         }
     }
@@ -117,7 +107,7 @@ pub struct SystemAudioCapture {
     /// Audio samples buffer
     samples: Arc<Mutex<Vec<f32>>>,
     /// ScreenCaptureKit stream
-    stream: Option<SCStream>,
+    stream: SCStream,
     /// Source description
     source_name: String,
 }
@@ -131,49 +121,53 @@ impl SystemAudioCapture {
         let samples = Arc::new(Mutex::new(Vec::new()));
 
         // Get shareable content (requires permission)
-        let content =
-            SCShareableContent::get_with_exclude_desktop_windows(true, true).map_err(|e| {
-                if e.to_string().contains("permission") {
-                    SystemAudioError::PermissionDenied
-                } else {
-                    SystemAudioError::StreamFailed(e.to_string())
-                }
-            })?;
+        let content = SCShareableContent::get().map_err(|e| {
+            let msg = format!("{:?}", e);
+            if msg.contains("permission") || msg.contains("denied") {
+                SystemAudioError::PermissionDenied
+            } else {
+                SystemAudioError::StreamFailed(msg)
+            }
+        })?;
 
-        // Configure for audio-only capture
-        let config = SCStreamConfiguration::new();
-        config.set_captures_audio(true);
-        config.set_excludes_current_process_audio(true);
-        config.set_sample_rate(SAMPLE_RATE as i32);
-        config.set_channel_count(1); // Mono for Whisper
-
-        // Create content filter for entire display audio
+        // Get displays
         let displays = content.displays();
         if displays.is_empty() {
             return Err(SystemAudioError::NoAudioSource);
         }
 
-        let filter =
-            SCContentFilter::new_with_display_excluding_windows(displays[0].clone(), Vec::new());
+        // Create content filter for entire display audio
+        let filter = SCContentFilter::new()
+            .with_display(&displays[0])
+            .with_excluding_windows(&[]);
 
-        // Create stream with audio handler
+        // Configure for audio capture at 16kHz mono
+        let config = SCStreamConfiguration::new()
+            .with_captures_audio(true)
+            .with_excludes_current_process_audio(true)
+            .with_sample_rate(SAMPLE_RATE as i32)
+            .with_channel_count(1);
+
+        // Create stream
+        let mut stream = SCStream::new(&filter, &config)
+            .map_err(|e| SystemAudioError::StreamFailed(format!("{:?}", e)))?;
+
+        // Add audio handler
         let handler = AudioHandler {
             samples: Arc::clone(&samples),
         };
-
-        let stream = SCStream::new(&filter, &config, handler)
-            .map_err(|e| SystemAudioError::StreamFailed(e.to_string()))?;
+        stream.add_output_handler(handler, SCStreamOutputType::Audio);
 
         // Start capturing
         stream
             .start_capture()
-            .map_err(|e| SystemAudioError::CaptureError(e.to_string()))?;
+            .map_err(|e| SystemAudioError::CaptureError(format!("{:?}", e)))?;
 
         info!("System audio capture started via ScreenCaptureKit");
 
         Ok(Self {
             samples,
-            stream: Some(stream),
+            stream,
             source_name: "ScreenCaptureKit".to_string(),
         })
     }
@@ -199,10 +193,8 @@ impl SystemAudioCapture {
 
 impl Drop for SystemAudioCapture {
     fn drop(&mut self) {
-        if let Some(stream) = self.stream.take() {
-            if let Err(e) = stream.stop_capture() {
-                warn!("Failed to stop capture: {:?}", e);
-            }
+        if let Err(e) = self.stream.stop_capture() {
+            warn!("Failed to stop capture: {:?}", e);
         }
         info!("System audio capture stopped");
     }
@@ -210,14 +202,14 @@ impl Drop for SystemAudioCapture {
 
 /// List available audio sources (displays for system audio).
 pub fn list_monitor_sources() -> Result<Vec<SourceInfo>, SystemAudioError> {
-    let content = SCShareableContent::get_with_exclude_desktop_windows(true, true)
-        .map_err(|e| SystemAudioError::StreamFailed(e.to_string()))?;
+    let content = SCShareableContent::get()
+        .map_err(|e| SystemAudioError::StreamFailed(format!("{:?}", e)))?;
 
     let mut sources = Vec::new();
 
     for (i, display) in content.displays().iter().enumerate() {
         sources.push(SourceInfo {
-            name: format!("display-{}", display.display_id()),
+            name: format!("display-{}", i),
             description: format!("Display {} System Audio", i + 1),
             is_monitor: true,
             sample_rate: SAMPLE_RATE,
@@ -243,15 +235,12 @@ pub fn list_monitor_sources() -> Result<Vec<SourceInfo>, SystemAudioError> {
 
 /// Check if ScreenCaptureKit is available (macOS 13+).
 pub fn is_available() -> bool {
-    // ScreenCaptureKit is available on macOS 13+
-    // The screencapturekit crate handles this check internally
-    true
+    true // The crate itself checks for macOS 13+
 }
 
 /// Check if screen recording permission is granted.
 pub fn has_permission() -> bool {
-    // Try to get shareable content - this will fail if permission is not granted
-    SCShareableContent::get_with_exclude_desktop_windows(true, true).is_ok()
+    SCShareableContent::get().is_ok()
 }
 
 #[cfg(test)]

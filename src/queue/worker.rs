@@ -284,6 +284,7 @@ mod tests {
             limiter: crate::config::LimiterConfig::default(),
             noise_reduction: crate::config::NoiseReductionConfig::default(),
             channels: crate::config::ChannelSelection::default(),
+            input_device: None,
         }
     }
 
@@ -311,6 +312,7 @@ mod tests {
             },
             noise_reduction: crate::config::NoiseReductionConfig::default(),
             channels: crate::config::ChannelSelection::default(),
+            input_device: None,
         }
     }
 
