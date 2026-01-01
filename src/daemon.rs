@@ -1468,6 +1468,69 @@ impl Daemon {
                                 }
                             }
                         }
+                        IpcCommand::StartRecording => {
+                            if matches!(self.state, DaemonState::Idle) {
+                                info!("🎙️ Recording started via IPC");
+                                let mark = audio_recorder.mark();
+                                tracker.reset_dedup();
+
+                                if let Some(interval) = chunk_interval {
+                                    let mut timer = tokio::time::interval(interval);
+                                    timer.set_missed_tick_behavior(
+                                        tokio::time::MissedTickBehavior::Skip,
+                                    );
+                                    chunk_timer = Some(timer);
+                                }
+
+                                self.state = DaemonState::Recording {
+                                    mark,
+                                    last_chunk_pos: audio_recorder.current_position(),
+                                    next_chunk_id: 0,
+                                };
+                                responder(IpcResponse::ok());
+                            } else {
+                                responder(IpcResponse::error("Already recording"));
+                            }
+                        }
+                        IpcCommand::StopRecording => {
+                            if !matches!(self.state, DaemonState::Idle) {
+                                info!("🛑 Recording stopped via IPC");
+                                chunk_timer = None;
+                                vad_timer = None;
+                                self.state = DaemonState::Idle;
+                                responder(IpcResponse::ok());
+                            } else {
+                                responder(IpcResponse::error("Not recording"));
+                            }
+                        }
+                        IpcCommand::ToggleRecording => {
+                            if matches!(self.state, DaemonState::Idle) {
+                                info!("🎙️ Recording toggled ON via IPC");
+                                let mark = audio_recorder.mark();
+                                tracker.reset_dedup();
+
+                                if let Some(interval) = chunk_interval {
+                                    let mut timer = tokio::time::interval(interval);
+                                    timer.set_missed_tick_behavior(
+                                        tokio::time::MissedTickBehavior::Skip,
+                                    );
+                                    chunk_timer = Some(timer);
+                                }
+
+                                self.state = DaemonState::Recording {
+                                    mark,
+                                    last_chunk_pos: audio_recorder.current_position(),
+                                    next_chunk_id: 0,
+                                };
+                                responder(IpcResponse::ok());
+                            } else {
+                                info!("🛑 Recording toggled OFF via IPC");
+                                chunk_timer = None;
+                                vad_timer = None;
+                                self.state = DaemonState::Idle;
+                                responder(IpcResponse::ok());
+                            }
+                        }
                     }
                 }
             }

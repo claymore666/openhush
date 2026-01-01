@@ -156,8 +156,8 @@ enum Commands {
         format: String,
     },
 
-    /// Control recording on a running daemon (Linux only, requires D-Bus)
-    #[cfg(target_os = "linux")]
+    /// Control recording on a running daemon
+    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
     Recording {
         #[command(subcommand)]
         action: RecordingAction,
@@ -213,8 +213,8 @@ enum Commands {
     },
 }
 
-/// Recording control actions (sent to daemon via D-Bus)
-#[cfg(target_os = "linux")]
+/// Recording control actions (sent to daemon via D-Bus on Linux, IPC on macOS/Windows)
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 #[derive(Subcommand)]
 enum RecordingAction {
     /// Start recording audio
@@ -973,45 +973,129 @@ async fn async_main(cli: Cli) -> anyhow::Result<()> {
             session.run().await?;
         }
 
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
         Commands::Recording { action } => {
-            use dbus::DbusClient;
+            #[cfg(target_os = "linux")]
+            {
+                use dbus::DbusClient;
 
-            let client = match DbusClient::connect().await {
-                Ok(c) => c,
-                Err(e) => {
-                    eprintln!("Failed to connect to D-Bus: {}", e);
-                    eprintln!("Is the daemon running? Try: openhush start");
+                let client = match DbusClient::connect().await {
+                    Ok(c) => c,
+                    Err(e) => {
+                        eprintln!("Failed to connect to D-Bus: {}", e);
+                        eprintln!("Is the daemon running? Try: openhush start");
+                        std::process::exit(1);
+                    }
+                };
+
+                if !client.is_daemon_running().await {
+                    eprintln!("Daemon is not running. Start it with: openhush start");
                     std::process::exit(1);
                 }
-            };
 
-            if !client.is_daemon_running().await {
-                eprintln!("Daemon is not running. Start it with: openhush start");
-                std::process::exit(1);
+                match action {
+                    RecordingAction::Start => {
+                        client.start_recording().await?;
+                        println!("Recording started");
+                    }
+                    RecordingAction::Stop => {
+                        client.stop_recording().await?;
+                        println!("Recording stopped");
+                    }
+                    RecordingAction::Toggle => {
+                        client.toggle_recording().await?;
+                        let status = client.get_status().await?;
+                        println!("Recording toggled: {}", status);
+                    }
+                    RecordingAction::Status => {
+                        let status = client.get_status().await?;
+                        let queue = client.queue_depth().await?;
+                        let version = client.version().await?;
+                        println!("Status: {}", status);
+                        println!("Queue depth: {}", queue);
+                        println!("Version: {}", version);
+                    }
+                }
             }
 
-            match action {
-                RecordingAction::Start => {
-                    client.start_recording().await?;
-                    println!("Recording started");
-                }
-                RecordingAction::Stop => {
-                    client.stop_recording().await?;
-                    println!("Recording stopped");
-                }
-                RecordingAction::Toggle => {
-                    client.toggle_recording().await?;
-                    let status = client.get_status().await?;
-                    println!("Recording toggled: {}", status);
-                }
-                RecordingAction::Status => {
-                    let status = client.get_status().await?;
-                    let queue = client.queue_depth().await?;
-                    let version = client.version().await?;
-                    println!("Status: {}", status);
-                    println!("Queue depth: {}", queue);
-                    println!("Version: {}", version);
+            #[cfg(any(target_os = "macos", target_os = "windows"))]
+            {
+                use ipc::{IpcClient, IpcCommand};
+
+                let mut client = match IpcClient::connect() {
+                    Ok(c) => c,
+                    Err(e) => {
+                        eprintln!("Failed to connect to daemon: {}", e);
+                        eprintln!("Is the daemon running? Try: openhush start");
+                        std::process::exit(1);
+                    }
+                };
+
+                match action {
+                    RecordingAction::Start => match client.send(IpcCommand::StartRecording) {
+                        Ok(response) => {
+                            if response.ok {
+                                println!("Recording started");
+                            } else if let Some(err) = response.error {
+                                eprintln!("Failed to start recording: {}", err);
+                                std::process::exit(1);
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to start recording: {}", e);
+                            std::process::exit(1);
+                        }
+                    },
+                    RecordingAction::Stop => match client.send(IpcCommand::StopRecording) {
+                        Ok(response) => {
+                            if response.ok {
+                                println!("Recording stopped");
+                            } else if let Some(err) = response.error {
+                                eprintln!("Failed to stop recording: {}", err);
+                                std::process::exit(1);
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to stop recording: {}", e);
+                            std::process::exit(1);
+                        }
+                    },
+                    RecordingAction::Toggle => match client.send(IpcCommand::ToggleRecording) {
+                        Ok(response) => {
+                            if response.ok {
+                                println!("Recording toggled");
+                            } else if let Some(err) = response.error {
+                                eprintln!("Failed to toggle recording: {}", err);
+                                std::process::exit(1);
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to toggle recording: {}", e);
+                            std::process::exit(1);
+                        }
+                    },
+                    RecordingAction::Status => match client.send(IpcCommand::Status) {
+                        Ok(response) => {
+                            if response.ok {
+                                let recording = response.recording.unwrap_or(false);
+                                let model = response.model_loaded.unwrap_or(false);
+                                let version = response.version.unwrap_or_default();
+                                println!(
+                                    "Status: {}",
+                                    if recording { "recording" } else { "idle" }
+                                );
+                                println!("Model loaded: {}", model);
+                                println!("Version: {}", version);
+                            } else if let Some(err) = response.error {
+                                eprintln!("Failed to get status: {}", err);
+                                std::process::exit(1);
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to get status: {}", e);
+                            std::process::exit(1);
+                        }
+                    },
                 }
             }
         }

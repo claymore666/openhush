@@ -53,6 +53,15 @@ pub enum IpcCommand {
     /// Unload the Whisper model to free GPU memory
     #[serde(rename = "unload_model")]
     UnloadModel,
+    /// Start recording audio
+    #[serde(rename = "start_recording")]
+    StartRecording,
+    /// Stop recording audio
+    #[serde(rename = "stop_recording")]
+    StopRecording,
+    /// Toggle recording state
+    #[serde(rename = "toggle_recording")]
+    ToggleRecording,
 }
 
 /// Response from daemon.
