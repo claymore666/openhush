@@ -7,15 +7,8 @@ use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use tracing::{debug, info, warn};
 
-use screencapturekit::{
-    cm_sample_buffer::CMSampleBuffer,
-    sc_content_filter::SCContentFilter,
-    sc_shareable_content::SCShareableContent,
-    sc_stream::SCStream,
-    sc_stream_configuration::SCStreamConfiguration,
-    sc_stream_output_trait::SCStreamOutputTrait,
-    sc_types::SCStreamOutputType,
-};
+use screencapturekit::prelude::*;
+use screencapturekit::stream::content_filter::SCContentFilterBuilder;
 
 /// Target sample rate for Whisper (16kHz)
 pub const SAMPLE_RATE: u32 = 16000;
@@ -89,25 +82,22 @@ pub struct SourceInfo {
 }
 
 /// Shared audio buffer for callback handler
-struct AudioBuffer {
+struct AudioBufferData {
     /// Accumulated samples at native rate
     samples_native: Vec<f32>,
-    /// Resampled samples at 16kHz
-    samples_resampled: Vec<f32>,
 }
 
-impl AudioBuffer {
+impl AudioBufferData {
     fn new() -> Self {
         Self {
             samples_native: Vec::with_capacity(NATIVE_SAMPLE_RATE as usize * 30), // 30s buffer
-            samples_resampled: Vec::new(),
         }
     }
 }
 
 /// Audio output handler for ScreenCaptureKit
 struct AudioOutputHandler {
-    buffer: Arc<Mutex<AudioBuffer>>,
+    buffer: Arc<Mutex<AudioBufferData>>,
 }
 
 impl SCStreamOutputTrait for AudioOutputHandler {
@@ -117,7 +107,7 @@ impl SCStreamOutputTrait for AudioOutputHandler {
         }
 
         // Extract audio data from the sample buffer
-        if let Some(audio_buffers) = sample.audio_buffer_list() {
+        if let Some(audio_buffer_list) = sample.audio_buffer_list() {
             let mut buffer = match self.buffer.lock() {
                 Ok(b) => b,
                 Err(e) => {
@@ -126,12 +116,12 @@ impl SCStreamOutputTrait for AudioOutputHandler {
                 }
             };
 
-            // Process each audio buffer (usually just one for mono/stereo)
-            for audio_buffer in audio_buffers.buffers() {
+            // Process each audio buffer in the list
+            for audio_buffer in audio_buffer_list.iter() {
                 // Get the raw audio data as bytes
                 let data = audio_buffer.data();
 
-                // Audio is typically 32-bit float PCM
+                // Audio is 32-bit float PCM (configured via SCStreamConfiguration)
                 // Convert bytes to f32 samples
                 let samples: Vec<f32> = data
                     .chunks_exact(4)
@@ -141,18 +131,7 @@ impl SCStreamOutputTrait for AudioOutputHandler {
                     })
                     .collect();
 
-                // If stereo, mix down to mono
-                let mono_samples: Vec<f32> = if audio_buffer.number_channels() > 1 {
-                    let channels = audio_buffer.number_channels() as usize;
-                    samples
-                        .chunks(channels)
-                        .map(|frame| frame.iter().sum::<f32>() / channels as f32)
-                        .collect()
-                } else {
-                    samples
-                };
-
-                buffer.samples_native.extend(mono_samples);
+                buffer.samples_native.extend(samples);
             }
 
             debug!(
@@ -166,7 +145,7 @@ impl SCStreamOutputTrait for AudioOutputHandler {
 /// System audio capture using ScreenCaptureKit
 pub struct SystemAudioCapture {
     /// Shared audio buffer
-    buffer: Arc<Mutex<AudioBuffer>>,
+    buffer: Arc<Mutex<AudioBufferData>>,
     /// Source description
     source_name: String,
     /// The capture stream (kept alive while capturing)
@@ -204,8 +183,11 @@ impl SystemAudioCapture {
 
         info!("Using display for audio capture: {}", display_name);
 
-        // Create content filter for the display (audio only, no video processing needed)
-        let filter = SCContentFilter::new_with_display_excluding_windows(display, vec![]);
+        // Create content filter for the display using builder pattern
+        let filter = SCContentFilterBuilder::default()
+            .with_display(display)
+            .with_excluding_windows(vec![])
+            .build();
 
         // Configure stream for audio capture
         // Note: ScreenCaptureKit captures at 48kHz, we'll resample to 16kHz
@@ -215,10 +197,10 @@ impl SystemAudioCapture {
             .with_captures_audio(true)
             .with_excludes_current_process_audio(false)
             .with_sample_rate(NATIVE_SAMPLE_RATE as i32)
-            .with_channel_count(1); // Mono
+            .with_channel_count(1); // Mono - no stereo mixing needed
 
         // Create shared buffer
-        let buffer = Arc::new(Mutex::new(AudioBuffer::new()));
+        let buffer = Arc::new(Mutex::new(AudioBufferData::new()));
 
         // Create output handler
         let handler = AudioOutputHandler {
@@ -259,8 +241,7 @@ impl SystemAudioCapture {
         }
 
         // Resample from 48kHz to 16kHz (factor of 3)
-        // Simple linear decimation - take every 3rd sample
-        // For better quality, consider using rubato crate
+        // Simple averaging decimation for anti-aliasing
         let resampled: Vec<f32> = buffer
             .samples_native
             .chunks(3)
@@ -268,7 +249,6 @@ impl SystemAudioCapture {
             .collect();
 
         buffer.samples_native.clear();
-        buffer.samples_resampled = resampled.clone();
 
         debug!("Extracted {} samples (resampled to 16kHz)", resampled.len());
         resampled
@@ -357,9 +337,8 @@ mod tests {
     }
 
     #[test]
-    fn test_audio_buffer_new() {
-        let buffer = AudioBuffer::new();
+    fn test_audio_buffer_data_new() {
+        let buffer = AudioBufferData::new();
         assert!(buffer.samples_native.is_empty());
-        assert!(buffer.samples_resampled.is_empty());
     }
 }
