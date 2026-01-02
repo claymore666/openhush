@@ -184,8 +184,8 @@ impl SystemAudioCapture {
 
         // Create content filter for the display using builder pattern
         let filter = SCContentFilter::create()
-            .with_display(display)
-            .with_excluding_windows(vec![])
+            .with_display(&display)
+            .with_excluding_windows(&[])
             .build();
 
         // Configure stream for audio capture
