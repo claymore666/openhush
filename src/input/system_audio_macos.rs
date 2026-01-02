@@ -340,4 +340,42 @@ mod tests {
         let buffer = AudioBufferData::new();
         assert!(buffer.samples_native.is_empty());
     }
+
+    #[test]
+    #[ignore] // Requires Screen Recording permission granted in TCC
+    fn test_has_permission() {
+        // This test requires Screen Recording permission to be granted
+        // Run manually with: cargo test test_has_permission --release -- --ignored --nocapture
+        let permission = has_permission();
+        println!("Screen Recording permission: {}", permission);
+        assert!(permission, "Screen Recording permission not granted. Grant it in System Preferences > Privacy & Security > Screen Recording");
+    }
+
+    #[test]
+    #[ignore] // Requires Screen Recording permission granted in TCC
+    fn test_system_audio_capture() {
+        // This test requires Screen Recording permission
+        // Run manually with: cargo test test_system_audio_capture --release -- --ignored --nocapture
+        use std::{thread, time::Duration};
+
+        println!("Creating system audio capture...");
+        let capture = SystemAudioCapture::new(None);
+
+        match capture {
+            Ok(cap) => {
+                println!("Capture created: {}", cap.source_name());
+                println!("Waiting 2 seconds for audio...");
+                thread::sleep(Duration::from_secs(2));
+
+                let samples = cap.extract_samples();
+                println!("Captured {} samples at 16kHz", samples.len());
+
+                // Should have captured some audio (even silence has samples)
+                assert!(!samples.is_empty(), "No audio samples captured");
+            }
+            Err(e) => {
+                panic!("Failed to create capture: {:?}", e);
+            }
+        }
+    }
 }
