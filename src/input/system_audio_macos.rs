@@ -8,7 +8,6 @@ use thiserror::Error;
 use tracing::{debug, info, warn};
 
 use screencapturekit::prelude::*;
-use screencapturekit::stream::content_filter::SCContentFilterBuilder;
 
 /// Target sample rate for Whisper (16kHz)
 pub const SAMPLE_RATE: u32 = 16000;
@@ -184,7 +183,7 @@ impl SystemAudioCapture {
         info!("Using display for audio capture: {}", display_name);
 
         // Create content filter for the display using builder pattern
-        let filter = SCContentFilterBuilder::default()
+        let filter = SCContentFilter::create()
             .with_display(display)
             .with_excluding_windows(vec![])
             .build();
