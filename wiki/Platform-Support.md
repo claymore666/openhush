@@ -239,8 +239,17 @@ To ensure cross-platform compatibility, test on:
 | Ubuntu | 22.04, 24.04 | x86_64 |
 | Fedora | 40+ | x86_64 |
 | Arch Linux | Rolling | x86_64 |
-| macOS | 13+ (Ventura), 14 (Sonoma) | x86_64, aarch64 |
+| macOS | 13+ (Ventura), 14 (Sonoma), 15 (Sequoia) | x86_64, aarch64 |
 | Windows | 10, 11 | x86_64 |
+
+### CI Build Runners
+
+| Target | Runner | Notes |
+|--------|--------|-------|
+| x86_64-unknown-linux-gnu | ubuntu-latest | Standard Linux build |
+| x86_64-apple-darwin | macos-15-intel | Native Intel Mac (ScreenCaptureKit) |
+| aarch64-apple-darwin | macos-15 | Native Apple Silicon (ScreenCaptureKit) |
+| x86_64-pc-windows-msvc | windows-latest | Standard Windows build |
 
 ---
 
@@ -275,12 +284,13 @@ echo 1 | sudo tee /sys/module/kvm/parameters/ignore_msrs
 
 ### macOS Permissions
 
-OpenHush requires two TCC permissions on macOS:
+OpenHush requires these TCC permissions on macOS:
 
 | Permission | Purpose | How to Grant |
 |------------|---------|--------------|
 | Microphone | Audio capture | System Settings → Privacy → Microphone |
 | Accessibility | Hotkey detection, text paste | System Settings → Privacy → Accessibility |
+| Screen Recording | System audio capture (ScreenCaptureKit) | System Settings → Privacy → Screen Recording |
 
 **Manual TCC database modification** (for automated setup):
 
@@ -294,6 +304,11 @@ sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" \
 sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" \
   "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version) \
    VALUES ('kTCCServiceAccessibility', '/path/to/openhush', 1, 2, 0, 1);"
+
+# Grant screen recording permission (for system audio capture)
+sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" \
+  "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version) \
+   VALUES ('kTCCServiceScreenCapture', '/path/to/openhush', 1, 2, 0, 1);"
 ```
 
 ### USB Audio Passthrough

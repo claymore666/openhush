@@ -7,12 +7,14 @@ All notable changes to OpenHush are documented here.
 ### macOS System Audio Capture
 
 - **ScreenCaptureKit Integration** — Capture desktop audio (meetings, calls, media) on macOS 13+
+- Works on both **Intel (x86_64)** and **Apple Silicon (ARM64)** Macs
 - Requires Screen Recording permission in System Settings
 - Automatic resampling from 48kHz to 16kHz for Whisper compatibility
 
 ### Cross-Platform Improvements
 
-- Cross-platform recording module with platform-specific stubs for Windows/macOS system audio
+- Cross-platform recording module with full macOS support
+- Native CI builds on `macos-15-intel` (x86_64) and `macos-15` (ARM64)
 - Documentation for macOS VM testing using OSX-KVM
 
 ---
