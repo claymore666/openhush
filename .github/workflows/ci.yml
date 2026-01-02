@@ -179,8 +179,8 @@ jobs:
           - os: macos-13
             target: x86_64-apple-darwin
             artifact: openhush
-          # Apple Silicon: use macos-14 (ARM64)
-          - os: macos-14
+          # Apple Silicon: use macos-15 (ARM64, Xcode 16.x)
+          - os: macos-15
             target: aarch64-apple-darwin
             artifact: openhush
           - os: windows-latest
