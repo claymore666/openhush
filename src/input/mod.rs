@@ -8,7 +8,10 @@ pub mod system_audio;
 // ScreenCaptureKit only works on aarch64 (Apple Silicon) due to Swift cross-compilation issues
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 pub mod system_audio_macos;
-#[cfg(any(target_os = "windows", all(target_os = "macos", target_arch = "x86_64")))]
+#[cfg(any(
+    target_os = "windows",
+    all(target_os = "macos", target_arch = "x86_64")
+))]
 pub mod system_audio_windows;
 pub mod wake_word;
 
@@ -25,7 +28,10 @@ pub use system_audio::{AudioSource, SourceInfo, SystemAudioCapture, SystemAudioE
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 pub use system_audio_macos::{AudioSource, SourceInfo, SystemAudioCapture, SystemAudioError};
 #[allow(unused_imports)]
-#[cfg(any(target_os = "windows", all(target_os = "macos", target_arch = "x86_64")))]
+#[cfg(any(
+    target_os = "windows",
+    all(target_os = "macos", target_arch = "x86_64")
+))]
 pub use system_audio_windows::{AudioSource, SourceInfo, SystemAudioCapture, SystemAudioError};
 
 use serde::{Deserialize, Serialize};
