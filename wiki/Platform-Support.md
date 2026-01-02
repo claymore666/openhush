@@ -116,7 +116,7 @@ This document tracks feature availability across all supported platforms.
 | App-aware profiles | ✅ | ✅ | ✅ | Closed |
 | Plugin system | ❌ | ❌ | ❌ | [#93](https://github.com/claymore666/openhush/issues/93) |
 | Wake word detection | ✅ | ✅ | ✅ | Closed |
-| System audio capture | ✅ | ❌ | ❌ | Closed |
+| System audio capture | ✅ | ✅ | ❌ | Closed |
 
 ---
 
@@ -239,8 +239,86 @@ To ensure cross-platform compatibility, test on:
 | Ubuntu | 22.04, 24.04 | x86_64 |
 | Fedora | 40+ | x86_64 |
 | Arch Linux | Rolling | x86_64 |
-| macOS | 13+ (Ventura) | x86_64, aarch64 |
+| macOS | 13+ (Ventura), 14 (Sonoma) | x86_64, aarch64 |
 | Windows | 10, 11 | x86_64 |
+
+---
+
+## macOS VM Testing (OSX-KVM)
+
+For developers without physical macOS hardware, a KVM-based macOS VM can be used for testing.
+
+### Requirements
+
+- Linux host with KVM support
+- AMD or Intel CPU with virtualization (VT-x/AMD-V)
+- 16GB+ RAM (VM uses 16GB)
+- IOMMU enabled for USB passthrough
+
+### Quick Setup
+
+```bash
+# Clone OSX-KVM
+git clone --depth 1 https://github.com/kholia/OSX-KVM.git ~/OSX-KVM
+
+# Download macOS Sonoma
+cd ~/OSX-KVM
+python3 fetch-macOS-v2.py -s sonoma --action download
+dmg2img -i com.apple.recovery.boot/BaseSystem.dmg BaseSystem.img
+
+# Create virtual disk
+qemu-img create -f qcow2 mac_hdd_ng.img 128G
+
+# Enable KVM parameter
+echo 1 | sudo tee /sys/module/kvm/parameters/ignore_msrs
+```
+
+### macOS Permissions
+
+OpenHush requires two TCC permissions on macOS:
+
+| Permission | Purpose | How to Grant |
+|------------|---------|--------------|
+| Microphone | Audio capture | System Settings → Privacy → Microphone |
+| Accessibility | Hotkey detection, text paste | System Settings → Privacy → Accessibility |
+
+**Manual TCC database modification** (for automated setup):
+
+```bash
+# Grant microphone permission
+sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" \
+  "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version) \
+   VALUES ('kTCCServiceMicrophone', '/path/to/openhush', 1, 2, 0, 1);"
+
+# Grant accessibility permission
+sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" \
+  "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version) \
+   VALUES ('kTCCServiceAccessibility', '/path/to/openhush', 1, 2, 0, 1);"
+```
+
+### USB Audio Passthrough
+
+For microphone testing in VM, pass through a USB audio device:
+
+```bash
+# Find USB device
+lsusb | grep -i audio
+
+# Add to QEMU command
+-device usb-host,vendorid=0x0b0e,productid=0x0e36
+
+# Grant permissions on host
+sudo chmod 666 /dev/bus/usb/XXX/YYY
+```
+
+### Verified Working
+
+Tested configuration (January 2026):
+- macOS Sonoma 14.x in QEMU/KVM
+- Skylake-Client-v4 CPU emulation
+- vmware-svga display adapter
+- USB passthrough for Jabra headset
+- All OpenHush features functional
 
 ---
 
