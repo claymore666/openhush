@@ -5,13 +5,9 @@ pub mod hotkey;
 pub mod ring_buffer;
 #[cfg(target_os = "linux")]
 pub mod system_audio;
-// ScreenCaptureKit only works on aarch64 (Apple Silicon) due to Swift cross-compilation issues
-#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+#[cfg(target_os = "macos")]
 pub mod system_audio_macos;
-#[cfg(any(
-    target_os = "windows",
-    all(target_os = "macos", target_arch = "x86_64")
-))]
+#[cfg(target_os = "windows")]
 pub mod system_audio_windows;
 pub mod wake_word;
 
@@ -25,13 +21,10 @@ pub use ring_buffer::AudioRingBuffer;
 #[cfg(target_os = "linux")]
 pub use system_audio::{AudioSource, SourceInfo, SystemAudioCapture, SystemAudioError};
 #[allow(unused_imports)]
-#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+#[cfg(target_os = "macos")]
 pub use system_audio_macos::{AudioSource, SourceInfo, SystemAudioCapture, SystemAudioError};
 #[allow(unused_imports)]
-#[cfg(any(
-    target_os = "windows",
-    all(target_os = "macos", target_arch = "x86_64")
-))]
+#[cfg(target_os = "windows")]
 pub use system_audio_windows::{AudioSource, SourceInfo, SystemAudioCapture, SystemAudioError};
 
 use serde::{Deserialize, Serialize};

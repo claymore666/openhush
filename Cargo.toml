@@ -156,9 +156,6 @@ wasapi = "0.22"
 tray-icon = "0.19"
 # macOS accessibility permission checking
 macos-accessibility-client = "0.0.1"
-
-# ScreenCaptureKit only works on Apple Silicon (aarch64) due to Swift cross-compilation issues
-[target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dependencies]
 # macOS system audio capture (ScreenCaptureKit, macOS 13+)
 screencapturekit = "1.5"
 

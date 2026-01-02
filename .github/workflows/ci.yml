@@ -175,10 +175,12 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             artifact: openhush
-          - os: macos-latest
+          # Intel Mac: use macos-13 (x86_64) for native ScreenCaptureKit compilation
+          - os: macos-13
             target: x86_64-apple-darwin
             artifact: openhush
-          - os: macos-latest
+          # Apple Silicon: use macos-14 (ARM64)
+          - os: macos-14
             target: aarch64-apple-darwin
             artifact: openhush
           - os: windows-latest
