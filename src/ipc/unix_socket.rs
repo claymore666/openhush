@@ -47,10 +47,10 @@ impl IpcClientInner {
 
         // Short timeouts for responsive TUI - don't block the UI
         stream
-            .set_read_timeout(Some(Duration::from_millis(500)))
+            .set_read_timeout(Some(Duration::from_millis(250)))
             .ok();
         stream
-            .set_write_timeout(Some(Duration::from_millis(500)))
+            .set_write_timeout(Some(Duration::from_millis(250)))
             .ok();
 
         let (response_tx, response_rx) = mpsc::channel();
@@ -82,7 +82,7 @@ impl IpcClientInner {
 
             // Wait for response with matching ID (short timeout for responsive UI)
             loop {
-                match self.response_rx.recv_timeout(Duration::from_millis(500)) {
+                match self.response_rx.recv_timeout(Duration::from_millis(250)) {
                     Ok((resp_id, response)) if resp_id == id => return Ok(response),
                     Ok(_) => continue, // Wrong ID, keep waiting
                     Err(_) => {
