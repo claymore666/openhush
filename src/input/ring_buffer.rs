@@ -452,4 +452,183 @@ mod tests {
 
         assert_eq!(extracted.len(), buffer.capacity());
     }
+
+    #[test]
+    fn test_current_levels_empty_buffer() {
+        let buffer = AudioRingBuffer::new(1.0, 16000);
+
+        // Empty buffer should return floor values
+        let (rms_db, peak_db) = buffer.current_levels(50);
+
+        assert_eq!(rms_db, -60.0);
+        assert_eq!(peak_db, -60.0);
+    }
+
+    #[test]
+    fn test_current_levels_silence() {
+        let buffer = AudioRingBuffer::new(1.0, 16000);
+
+        // Push silence (zeros)
+        let samples: Vec<f32> = vec![0.0; 1600]; // 100ms at 16kHz
+        buffer.push_samples(&samples);
+
+        let (rms_db, peak_db) = buffer.current_levels(50);
+
+        assert_eq!(rms_db, -60.0);
+        assert_eq!(peak_db, -60.0);
+    }
+
+    #[test]
+    fn test_current_levels_full_scale() {
+        let buffer = AudioRingBuffer::new(1.0, 16000);
+
+        // Push full scale signal (1.0)
+        let samples: Vec<f32> = vec![1.0; 1600];
+        buffer.push_samples(&samples);
+
+        let (rms_db, peak_db) = buffer.current_levels(50);
+
+        // Full scale = 0 dB
+        assert!(
+            (rms_db - 0.0).abs() < 0.1,
+            "RMS should be ~0 dB, got {}",
+            rms_db
+        );
+        assert!(
+            (peak_db - 0.0).abs() < 0.1,
+            "Peak should be ~0 dB, got {}",
+            peak_db
+        );
+    }
+
+    #[test]
+    fn test_current_levels_half_amplitude() {
+        let buffer = AudioRingBuffer::new(1.0, 16000);
+
+        // Push half amplitude signal (0.5)
+        let samples: Vec<f32> = vec![0.5; 1600];
+        buffer.push_samples(&samples);
+
+        let (rms_db, peak_db) = buffer.current_levels(50);
+
+        // 0.5 amplitude = 20 * log10(0.5) = -6.02 dB
+        assert!(
+            (rms_db - (-6.02)).abs() < 0.1,
+            "RMS should be ~-6 dB, got {}",
+            rms_db
+        );
+        assert!(
+            (peak_db - (-6.02)).abs() < 0.1,
+            "Peak should be ~-6 dB, got {}",
+            peak_db
+        );
+    }
+
+    #[test]
+    fn test_current_levels_sine_wave() {
+        let buffer = AudioRingBuffer::new(1.0, 16000);
+
+        // Push a 1kHz sine wave at full amplitude
+        let samples: Vec<f32> = (0..1600)
+            .map(|i| (2.0 * std::f32::consts::PI * 1000.0 * i as f32 / 16000.0).sin())
+            .collect();
+        buffer.push_samples(&samples);
+
+        let (rms_db, peak_db) = buffer.current_levels(50);
+
+        // Sine wave RMS = amplitude / sqrt(2) = 0.707, so RMS dB = 20*log10(0.707) = -3.01 dB
+        // Peak = 1.0, so Peak dB = 0 dB
+        assert!(
+            (rms_db - (-3.01)).abs() < 0.5,
+            "Sine RMS should be ~-3 dB, got {}",
+            rms_db
+        );
+        assert!(
+            (peak_db - 0.0).abs() < 0.1,
+            "Sine peak should be ~0 dB, got {}",
+            peak_db
+        );
+    }
+
+    #[test]
+    fn test_current_levels_peak_detection() {
+        let buffer = AudioRingBuffer::new(1.0, 16000);
+
+        // Push mostly quiet samples with one loud spike
+        let mut samples: Vec<f32> = vec![0.1; 1600];
+        samples[800] = 0.8; // Spike in the middle
+
+        buffer.push_samples(&samples);
+
+        let (rms_db, peak_db) = buffer.current_levels(50);
+
+        // Peak should detect the 0.8 spike = 20*log10(0.8) = -1.94 dB
+        assert!(
+            (peak_db - (-1.94)).abs() < 0.1,
+            "Peak should detect spike at ~-2 dB, got {}",
+            peak_db
+        );
+        // RMS should be much lower (mostly 0.1 amplitude)
+        assert!(rms_db < -15.0, "RMS should be low, got {}", rms_db);
+    }
+
+    #[test]
+    fn test_current_levels_window_size() {
+        let buffer = AudioRingBuffer::new(1.0, 16000);
+
+        // Push quiet samples first, then loud samples
+        let quiet: Vec<f32> = vec![0.1; 1600]; // 100ms
+        let loud: Vec<f32> = vec![0.8; 800]; // 50ms
+
+        buffer.push_samples(&quiet);
+        buffer.push_samples(&loud);
+
+        // 50ms window should only see the loud samples
+        let (rms_50, peak_50) = buffer.current_levels(50);
+        // 100ms window should average both
+        let (rms_100, _peak_100) = buffer.current_levels(100);
+
+        // 50ms window sees 0.8 amplitude
+        assert!(
+            (rms_50 - (-1.94)).abs() < 0.1,
+            "50ms RMS should be ~-2 dB, got {}",
+            rms_50
+        );
+        assert!(
+            (peak_50 - (-1.94)).abs() < 0.1,
+            "50ms peak should be ~-2 dB, got {}",
+            peak_50
+        );
+
+        // 100ms window averages 0.1 and 0.8
+        // RMS = sqrt((0.1^2 * 800 + 0.8^2 * 800) / 1600) = sqrt(0.325) = 0.57
+        // 20*log10(0.57) = -4.88 dB
+        assert!(
+            rms_100 < rms_50,
+            "100ms RMS should be lower than 50ms due to quiet section"
+        );
+    }
+
+    #[test]
+    fn test_current_levels_negative_samples() {
+        let buffer = AudioRingBuffer::new(1.0, 16000);
+
+        // Push negative samples (should use absolute value)
+        let samples: Vec<f32> = vec![-0.5; 1600];
+        buffer.push_samples(&samples);
+
+        let (rms_db, peak_db) = buffer.current_levels(50);
+
+        // Should be same as positive 0.5
+        assert!(
+            (rms_db - (-6.02)).abs() < 0.1,
+            "RMS should be ~-6 dB, got {}",
+            rms_db
+        );
+        assert!(
+            (peak_db - (-6.02)).abs() < 0.1,
+            "Peak should be ~-6 dB, got {}",
+            peak_db
+        );
+    }
 }

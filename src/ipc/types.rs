@@ -264,3 +264,206 @@ pub enum IpcMessage {
     /// Event pushed from daemon (no id, not a response).
     Event { event: IpcEvent },
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_audio_level_event_serialization() {
+        let event = IpcEvent::AudioLevel {
+            rms_db: -20.5,
+            peak_db: -10.2,
+            vad_active: true,
+        };
+
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"event\":\"audio_level\""));
+        assert!(json.contains("\"rms_db\":-20.5"));
+        assert!(json.contains("\"peak_db\":-10.2"));
+        assert!(json.contains("\"vad_active\":true"));
+
+        // Roundtrip
+        let parsed: IpcEvent = serde_json::from_str(&json).unwrap();
+        match parsed {
+            IpcEvent::AudioLevel {
+                rms_db,
+                peak_db,
+                vad_active,
+            } => {
+                assert!((rms_db - (-20.5)).abs() < 0.001);
+                assert!((peak_db - (-10.2)).abs() < 0.001);
+                assert!(vad_active);
+            }
+            _ => panic!("Expected AudioLevel event"),
+        }
+    }
+
+    #[test]
+    fn test_audio_level_event_in_message() {
+        let msg = IpcMessage::Event {
+            event: IpcEvent::AudioLevel {
+                rms_db: -30.0,
+                peak_db: -15.0,
+                vad_active: false,
+            },
+        };
+
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains("\"type\":\"event\""));
+        assert!(json.contains("\"event\":\"audio_level\""));
+
+        // Roundtrip
+        let parsed: IpcMessage = serde_json::from_str(&json).unwrap();
+        match parsed {
+            IpcMessage::Event { event } => match event {
+                IpcEvent::AudioLevel {
+                    rms_db,
+                    peak_db,
+                    vad_active,
+                } => {
+                    assert!((rms_db - (-30.0)).abs() < 0.001);
+                    assert!((peak_db - (-15.0)).abs() < 0.001);
+                    assert!(!vad_active);
+                }
+                _ => panic!("Expected AudioLevel event"),
+            },
+            _ => panic!("Expected Event message"),
+        }
+    }
+
+    #[test]
+    fn test_status_response_serialization() {
+        let response = IpcResponse::status_simple(true, true);
+
+        let json = serde_json::to_string(&response).unwrap();
+        assert!(json.contains("\"ok\":true"));
+        assert!(json.contains("\"state\":\"recording\""));
+        assert!(json.contains("\"model_loaded\":true"));
+
+        // Roundtrip
+        let parsed: IpcResponse = serde_json::from_str(&json).unwrap();
+        assert!(parsed.ok);
+        match parsed.data {
+            Some(IpcResponseData::Status(status)) => {
+                assert_eq!(status.state, DaemonState::Recording);
+                assert!(status.model_loaded);
+            }
+            _ => panic!("Expected Status data"),
+        }
+    }
+
+    #[test]
+    fn test_subscribe_command_serialization() {
+        let cmd = IpcCommand::Subscribe { events: vec![] };
+
+        let json = serde_json::to_string(&cmd).unwrap();
+        assert!(json.contains("\"cmd\":\"subscribe\""));
+
+        // Roundtrip
+        let parsed: IpcCommand = serde_json::from_str(&json).unwrap();
+        match parsed {
+            IpcCommand::Subscribe { events } => {
+                assert!(events.is_empty());
+            }
+            _ => panic!("Expected Subscribe command"),
+        }
+    }
+
+    #[test]
+    fn test_command_message_serialization() {
+        let msg = IpcMessage::Command {
+            id: 42,
+            cmd: IpcCommand::Status,
+        };
+
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains("\"type\":\"command\""));
+        assert!(json.contains("\"id\":42"));
+        assert!(json.contains("\"cmd\":\"status\""));
+
+        // Roundtrip
+        let parsed: IpcMessage = serde_json::from_str(&json).unwrap();
+        match parsed {
+            IpcMessage::Command { id, cmd } => {
+                assert_eq!(id, 42);
+                assert!(matches!(cmd, IpcCommand::Status));
+            }
+            _ => panic!("Expected Command message"),
+        }
+    }
+
+    #[test]
+    fn test_pong_response() {
+        let response = IpcResponse::pong();
+
+        assert!(response.ok);
+        match response.data {
+            Some(IpcResponseData::Pong { timestamp }) => {
+                // Timestamp should be reasonable (after year 2020)
+                assert!(timestamp > 1577836800000); // Jan 1, 2020 in ms
+            }
+            _ => panic!("Expected Pong data"),
+        }
+    }
+
+    #[test]
+    fn test_error_response() {
+        let response = IpcResponse::error("Something went wrong");
+
+        assert!(!response.ok);
+        assert!(response.data.is_none());
+        assert_eq!(response.error, Some("Something went wrong".to_string()));
+    }
+
+    #[test]
+    fn test_transcription_complete_event() {
+        let event = IpcEvent::TranscriptionComplete {
+            id: 123,
+            recording_id: 456,
+            text: "Hello world".to_string(),
+            duration_secs: 2.5,
+            llm_corrected: true,
+        };
+
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"event\":\"transcription_complete\""));
+        assert!(json.contains("\"text\":\"Hello world\""));
+        assert!(json.contains("\"llm_corrected\":true"));
+
+        // Roundtrip
+        let parsed: IpcEvent = serde_json::from_str(&json).unwrap();
+        match parsed {
+            IpcEvent::TranscriptionComplete {
+                id,
+                recording_id,
+                text,
+                duration_secs,
+                llm_corrected,
+            } => {
+                assert_eq!(id, 123);
+                assert_eq!(recording_id, 456);
+                assert_eq!(text, "Hello world");
+                assert!((duration_secs - 2.5).abs() < 0.001);
+                assert!(llm_corrected);
+            }
+            _ => panic!("Expected TranscriptionComplete event"),
+        }
+    }
+
+    #[test]
+    fn test_daemon_state_serialization() {
+        assert_eq!(
+            serde_json::to_string(&DaemonState::Idle).unwrap(),
+            "\"idle\""
+        );
+        assert_eq!(
+            serde_json::to_string(&DaemonState::Recording).unwrap(),
+            "\"recording\""
+        );
+        assert_eq!(
+            serde_json::to_string(&DaemonState::Processing).unwrap(),
+            "\"processing\""
+        );
+    }
+}
