@@ -149,6 +149,24 @@ impl IpcResponse {
         }
     }
 
+    /// Simple status response for backward compatibility.
+    pub fn status_simple(is_recording: bool, model_loaded: bool) -> Self {
+        Self::status(DaemonStatus {
+            state: if is_recording {
+                DaemonState::Recording
+            } else {
+                DaemonState::Idle
+            },
+            recording_duration: None,
+            queue_depth: 0,
+            model: String::new(),
+            model_loaded,
+            input_device: String::new(),
+            outputs_enabled: Vec::new(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
+        })
+    }
+
     pub fn subscribed(subscription_id: u64) -> Self {
         Self {
             ok: true,

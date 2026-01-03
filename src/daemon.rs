@@ -21,8 +21,7 @@ use crate::engine::{WhisperEngine, WhisperError};
 use crate::gui;
 use crate::input::wake_word::{WakeWordDetector, WakeWordError};
 use crate::input::{AudioMark, AudioRecorder, AudioRecorderError, HotkeyEvent, HotkeyListener};
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-use crate::ipc::{IpcCommand, IpcResponse, IpcServer};
+use crate::ipc::{IpcCommand, IpcEvent, IpcResponse, IpcServer, IpcServerHandle};
 use crate::output::{ActionContext, ActionRunner, OutputError, OutputHandler};
 use crate::platform::{AudioFeedback, CurrentPlatform, Notifier, Platform};
 use crate::queue::{
@@ -38,6 +37,7 @@ use crate::tray::{TrayEvent, TrayManager};
 use crate::vad::VadConfig;
 use crate::vad::{silero::SileroVad, VadEngine, VadError, VadState};
 use crate::vocabulary::{VocabularyError, VocabularyManager};
+use futures_util::FutureExt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use thiserror::Error;
@@ -49,6 +49,9 @@ const CHANNEL_BUFFER_SIZE: usize = 32;
 
 /// VAD processing interval (32ms = 512 samples at 16kHz, matches Silero VAD chunk size)
 const VAD_PROCESS_INTERVAL_MS: u64 = 32;
+
+/// Audio level update interval for UI visualization (50ms = 20 Hz)
+const AUDIO_LEVEL_INTERVAL_MS: u64 = 50;
 
 // ============================================================================
 // Initialization Functions
@@ -885,18 +888,24 @@ impl Daemon {
             }
         };
 
-        // Initialize IPC server (macOS and Windows)
-        #[cfg(any(target_os = "macos", target_os = "windows"))]
-        let ipc_server: Option<IpcServer> = match IpcServer::new() {
-            Ok(server) => Some(server),
-            Err(e) => {
-                warn!(
-                    "IPC server unavailable: {}. Continuing without IPC control.",
-                    e
-                );
-                None
-            }
-        };
+        // Initialize IPC server (Unix only for now)
+        #[cfg(unix)]
+        let (ipc_server, ipc_handle): (Option<IpcServer>, Option<IpcServerHandle>) =
+            match IpcServer::new() {
+                Ok(server) => {
+                    let handle = server.handle();
+                    (Some(server), Some(handle))
+                }
+                Err(e) => {
+                    warn!(
+                        "IPC server unavailable: {}. Continuing without IPC control.",
+                        e
+                    );
+                    (None, None)
+                }
+            };
+        #[cfg(not(unix))]
+        let (ipc_server, ipc_handle): (Option<IpcServer>, Option<IpcServerHandle>) = (None, None);
 
         // Initialize REST API server if enabled
         let api_status = Arc::new(RwLock::new(api::DaemonStatus {
@@ -1144,8 +1153,7 @@ impl Daemon {
         let worker_handle = spawn_worker(initial_engine, command_rx, result_tx, audio_config)?;
         info!("Transcription worker started");
 
-        // Track model loaded state (for macOS/Windows IPC; Linux uses dbus_status)
-        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        // Track model loaded state (for IPC clients)
         let mut model_loaded = preload;
 
         // Result tracker for ordered output
@@ -1203,6 +1211,16 @@ impl Daemon {
         let mut wake_word_timer: Option<tokio::time::Interval> = if wake_word_detector.is_some() {
             let mut timer =
                 tokio::time::interval(tokio::time::Duration::from_millis(VAD_PROCESS_INTERVAL_MS));
+            timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            Some(timer)
+        } else {
+            None
+        };
+
+        // Audio level timer for UI visualization (always on when IPC server is available)
+        let mut audio_level_timer: Option<tokio::time::Interval> = if ipc_handle.is_some() {
+            let mut timer =
+                tokio::time::interval(tokio::time::Duration::from_millis(AUDIO_LEVEL_INTERVAL_MS));
             timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             Some(timer)
         } else {
@@ -1408,14 +1426,40 @@ impl Daemon {
                 }
             }
 
-            // Check for IPC commands (macOS and Windows)
-            #[cfg(any(target_os = "macos", target_os = "windows"))]
+            // Check for IPC commands (all platforms)
             if let Some(ref server) = ipc_server {
-                if let Some((cmd, responder)) = server.try_recv() {
+                // Process any queued broadcasts (audio levels, etc.)
+                server.process_broadcasts();
+
+                // Poll for incoming commands
+                for (client_id, cmd, responder) in server.poll() {
                     match cmd {
                         IpcCommand::Status => {
                             let is_recording = !matches!(self.state, DaemonState::Idle);
-                            responder(IpcResponse::status(is_recording, model_loaded));
+                            responder(IpcResponse::status_simple(is_recording, model_loaded));
+                        }
+                        IpcCommand::Subscribe { events: _ } => {
+                            server.subscribe_client(client_id);
+                            responder(IpcResponse::subscribed(client_id));
+                        }
+                        IpcCommand::Unsubscribe => {
+                            responder(IpcResponse::ok());
+                        }
+                        IpcCommand::Ping => {
+                            responder(IpcResponse::pong());
+                        }
+                        IpcCommand::HistoryList {
+                            limit: _,
+                            offset: _,
+                        } => {
+                            // TODO: Implement history storage
+                            responder(IpcResponse::error("History not yet implemented"));
+                        }
+                        IpcCommand::ConfigGet { key: _ } => {
+                            responder(IpcResponse::error("Config get not yet implemented"));
+                        }
+                        IpcCommand::ConfigSet { key: _, value: _ } => {
+                            responder(IpcResponse::error("Config set not yet implemented"));
                         }
                         IpcCommand::Stop => {
                             info!("Stop command received via IPC");
@@ -1532,6 +1576,23 @@ impl Daemon {
                                 responder(IpcResponse::ok());
                             }
                         }
+                    }
+                }
+            }
+
+            // Broadcast audio levels to IPC clients (20 Hz)
+            if let Some(ref mut timer) = audio_level_timer {
+                if timer.tick().now_or_never().is_some() {
+                    if let Some(ref handle) = ipc_handle {
+                        // Calculate current audio levels from ring buffer
+                        let (rms_db, peak_db) = audio_recorder.current_levels(50); // 50ms window
+                        let vad_active = !matches!(self.state, DaemonState::Idle);
+
+                        handle.broadcast(IpcEvent::AudioLevel {
+                            rms_db,
+                            peak_db,
+                            vad_active,
+                        });
                     }
                 }
             }

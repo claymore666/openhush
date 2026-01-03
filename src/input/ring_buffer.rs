@@ -302,6 +302,61 @@ impl AudioRingBuffer {
     pub fn sample_rate(&self) -> u32 {
         self.sample_rate
     }
+
+    /// Calculate current audio levels (RMS and peak) from recent samples.
+    ///
+    /// This is efficient for real-time level metering - it only reads
+    /// a small window of recent samples without copying.
+    ///
+    /// # Arguments
+    /// * `window_ms` - Window size in milliseconds (e.g., 50 for 50ms)
+    ///
+    /// # Returns
+    /// Tuple of (rms_db, peak_db) where:
+    /// - rms_db: Root Mean Square level in dB (typically -60 to 0)
+    /// - peak_db: Peak level in dB
+    pub fn current_levels(&self, window_ms: u32) -> (f32, f32) {
+        let window_samples = (self.sample_rate * window_ms / 1000) as usize;
+        let window_samples = window_samples.min(self.capacity);
+
+        let current_write = self.write_pos.load(Ordering::Acquire);
+
+        // SAFETY: Read-only access to recent samples that have been written
+        let buffer = unsafe { &*self.buffer.get() };
+
+        let mut sum_squares: f32 = 0.0;
+        let mut peak: f32 = 0.0;
+
+        for i in 0..window_samples {
+            let idx = (current_write.wrapping_sub(window_samples) + i) & self.mask;
+            let sample = buffer[idx].abs();
+            sum_squares += sample * sample;
+            if sample > peak {
+                peak = sample;
+            }
+        }
+
+        let rms = if window_samples > 0 {
+            (sum_squares / window_samples as f32).sqrt()
+        } else {
+            0.0
+        };
+
+        // Convert to dB
+        let rms_db = if rms > 0.0 {
+            20.0 * rms.log10()
+        } else {
+            -60.0 // Floor at -60 dB
+        };
+
+        let peak_db = if peak > 0.0 {
+            20.0 * peak.log10()
+        } else {
+            -60.0
+        };
+
+        (rms_db.max(-60.0), peak_db.max(-60.0))
+    }
 }
 
 #[cfg(test)]

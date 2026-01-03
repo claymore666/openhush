@@ -682,6 +682,19 @@ impl AudioRecorder {
         self.ring_buffer.current_position()
     }
 
+    /// Calculate current audio levels (RMS and peak) from recent samples.
+    ///
+    /// Used for real-time level metering in the UI.
+    ///
+    /// # Arguments
+    /// * `window_ms` - Window size in milliseconds (e.g., 50 for 50ms)
+    ///
+    /// # Returns
+    /// Tuple of (rms_db, peak_db) where values are in dB (typically -60 to 0)
+    pub fn current_levels(&self, window_ms: u32) -> (f32, f32) {
+        self.ring_buffer.current_levels(window_ms)
+    }
+
     /// Extract a chunk of audio from one position to another.
     ///
     /// Used for streaming chunk extraction during recording. Call this
