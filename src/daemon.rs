@@ -2736,20 +2736,27 @@ pub async fn status() -> Result<(), DaemonError> {
             Ok(mut client) => match client.send(IpcCommand::Status) {
                 Ok(response) => {
                     if response.ok {
-                        println!("OpenHush daemon is running");
-                        if let Some(version) = response.version {
-                            println!("  Version: {}", version);
-                        }
-                        if let Some(recording) = response.recording {
-                            println!("  Recording: {}", if recording { "yes" } else { "no" });
-                        }
-                        if let Some(model_loaded) = response.model_loaded {
+                        if let Some(crate::ipc::IpcResponseData::Status(status)) = response.data {
+                            println!("OpenHush daemon is running");
+                            println!("  Version: {}", status.version);
+                            println!(
+                                "  Recording: {}",
+                                if status.state == crate::ipc::DaemonState::Recording {
+                                    "yes"
+                                } else {
+                                    "no"
+                                }
+                            );
                             println!(
                                 "  Model: {}",
-                                if model_loaded { "loaded" } else { "not loaded" }
+                                if status.model_loaded {
+                                    "loaded"
+                                } else {
+                                    "not loaded"
+                                }
                             );
+                            return Ok(());
                         }
-                        return Ok(());
                     }
                 }
                 Err(e) => {
