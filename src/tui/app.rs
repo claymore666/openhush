@@ -1,5 +1,6 @@
 //! Application state and logic for the TUI.
 
+use crate::tui::theme::Theme;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent};
 
 /// Application result type.
@@ -27,6 +28,8 @@ pub enum RecordingState {
 pub struct App {
     /// Is the application running?
     running: bool,
+    /// Color theme
+    pub theme: Theme,
     /// Currently active panel
     pub active_panel: ActivePanel,
     /// Recording state
@@ -71,6 +74,7 @@ impl App {
     pub fn new() -> Self {
         Self {
             running: true,
+            theme: Theme::terminal_default(),
             active_panel: ActivePanel::default(),
             recording_state: RecordingState::default(),
             recording_duration: 0.0,

@@ -4,7 +4,7 @@ use crate::tui::app::{ActivePanel, App, RecordingState};
 use crate::tui::widgets::audio_meter::AudioMeter;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
     Frame,
@@ -26,7 +26,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
     // Help overlay
     if app.show_help {
-        draw_help_overlay(frame);
+        draw_help_overlay(frame, app);
     }
 }
 
@@ -46,16 +46,17 @@ fn draw_left_panel(frame: &mut Frame, app: &App, area: Rect) {
     draw_status_panel(frame, app, chunks[0]);
     draw_audio_meter(frame, app, chunks[1]);
     draw_io_summary(frame, app, chunks[2]);
-    draw_actions_panel(frame, chunks[4]);
+    draw_actions_panel(frame, app, chunks[4]);
 }
 
 /// Draw the status panel.
 fn draw_status_panel(frame: &mut Frame, app: &App, area: Rect) {
+    let theme = &app.theme;
     let is_active = app.active_panel == ActivePanel::Status;
     let border_style = if is_active {
-        Style::default().fg(Color::Cyan)
+        theme.border_active_style()
     } else {
-        Style::default().fg(Color::DarkGray)
+        theme.border_inactive_style()
     };
 
     let block = Block::default()
@@ -67,10 +68,10 @@ fn draw_status_panel(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(block, area);
 
     // Recording state with indicator
-    let (state_icon, state_text, state_color) = match app.recording_state {
-        RecordingState::Idle => ("○", "Ready", Color::Green),
-        RecordingState::Recording => ("●", "Recording", Color::Red),
-        RecordingState::Processing => ("◐", "Processing", Color::Yellow),
+    let (state_icon, state_text, state_style) = match app.recording_state {
+        RecordingState::Idle => ("○", "Ready", theme.ready_style()),
+        RecordingState::Recording => ("●", "Recording", theme.recording_style()),
+        RecordingState::Processing => ("◐", "Processing", theme.processing_style()),
     };
 
     let duration_text = if app.recording_state == RecordingState::Recording {
@@ -81,19 +82,19 @@ fn draw_status_panel(frame: &mut Frame, app: &App, area: Rect) {
 
     let lines = vec![
         Line::from(vec![
-            Span::styled(state_icon, Style::default().fg(state_color)),
+            Span::styled(state_icon, state_style),
             Span::raw(" "),
-            Span::styled(state_text, Style::default().fg(state_color)),
-            Span::styled(duration_text, Style::default().fg(Color::White)),
+            Span::styled(state_text, state_style),
+            Span::styled(duration_text, theme.text_style()),
         ]),
         Line::from(""),
         Line::from(vec![
             Span::raw("Model: "),
-            Span::styled(&app.model_name, Style::default().fg(Color::Cyan)),
+            Span::styled(&app.model_name, theme.accent_style()),
         ]),
         Line::from(vec![
             Span::raw("Lang:  "),
-            Span::styled(&app.language, Style::default().fg(Color::Cyan)),
+            Span::styled(&app.language, theme.accent_style()),
             Span::raw(" → English"),
         ]),
         Line::from(vec![
@@ -104,11 +105,11 @@ fn draw_status_panel(frame: &mut Frame, app: &App, area: Rect) {
                 } else {
                     "○ Off"
                 },
-                Style::default().fg(if app.vad_enabled {
-                    Color::Green
+                if app.vad_enabled {
+                    theme.success_style()
                 } else {
-                    Color::DarkGray
-                }),
+                    theme.muted_style()
+                },
             ),
         ]),
         Line::from(vec![
@@ -119,11 +120,11 @@ fn draw_status_panel(frame: &mut Frame, app: &App, area: Rect) {
                 } else {
                     "○ Off".to_string()
                 },
-                Style::default().fg(if app.llm_enabled {
-                    Color::Green
+                if app.llm_enabled {
+                    theme.success_style()
                 } else {
-                    Color::DarkGray
-                }),
+                    theme.muted_style()
+                },
             ),
         ]),
     ];
@@ -134,23 +135,25 @@ fn draw_status_panel(frame: &mut Frame, app: &App, area: Rect) {
 
 /// Draw the audio level meter.
 fn draw_audio_meter(frame: &mut Frame, app: &App, area: Rect) {
+    let theme = &app.theme;
     let block = Block::default()
         .title(" Audio ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::DarkGray));
+        .border_style(theme.border_inactive_style());
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let meter = AudioMeter::new(&app.audio_history);
+    let meter = AudioMeter::new(&app.audio_history).with_theme(theme);
     frame.render_widget(meter, inner);
 }
 
 /// Draw I/O summary.
-fn draw_io_summary(frame: &mut Frame, _app: &App, area: Rect) {
+fn draw_io_summary(frame: &mut Frame, app: &App, area: Rect) {
+    let theme = &app.theme;
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::DarkGray));
+        .border_style(theme.border_inactive_style());
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -158,13 +161,13 @@ fn draw_io_summary(frame: &mut Frame, _app: &App, area: Rect) {
     let lines = vec![
         Line::from(vec![
             Span::raw("In:  "),
-            Span::styled("Default Mic", Style::default().fg(Color::Cyan)),
+            Span::styled("Default Mic", theme.accent_style()),
         ]),
         Line::from(vec![
             Span::raw("Out: "),
-            Span::styled("Clipboard ✓", Style::default().fg(Color::Green)),
+            Span::styled("Clipboard ✓", theme.success_style()),
             Span::raw(" "),
-            Span::styled("Paste ✓", Style::default().fg(Color::Green)),
+            Span::styled("Paste ✓", theme.success_style()),
         ]),
     ];
 
@@ -173,35 +176,37 @@ fn draw_io_summary(frame: &mut Frame, _app: &App, area: Rect) {
 }
 
 /// Draw the actions panel.
-fn draw_actions_panel(frame: &mut Frame, area: Rect) {
+fn draw_actions_panel(frame: &mut Frame, app: &App, area: Rect) {
+    let theme = &app.theme;
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::DarkGray));
+        .border_style(theme.border_inactive_style());
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
+    let shortcut = theme.shortcut_style();
     let lines = vec![
         Line::from(vec![
-            Span::styled("[r]", Style::default().fg(Color::Yellow)),
+            Span::styled("[r]", shortcut),
             Span::raw("ecord  "),
-            Span::styled("[h]", Style::default().fg(Color::Yellow)),
+            Span::styled("[h]", shortcut),
             Span::raw("istory "),
-            Span::styled("[m]", Style::default().fg(Color::Yellow)),
+            Span::styled("[m]", shortcut),
             Span::raw("odels"),
         ]),
         Line::from(vec![
-            Span::styled("[c]", Style::default().fg(Color::Yellow)),
+            Span::styled("[c]", shortcut),
             Span::raw("onfig  "),
-            Span::styled("[i]", Style::default().fg(Color::Yellow)),
+            Span::styled("[i]", shortcut),
             Span::raw("nput   "),
-            Span::styled("[o]", Style::default().fg(Color::Yellow)),
+            Span::styled("[o]", shortcut),
             Span::raw("utput"),
         ]),
         Line::from(vec![
-            Span::styled("[q]", Style::default().fg(Color::Yellow)),
+            Span::styled("[q]", shortcut),
             Span::raw("uit    "),
-            Span::styled("[?]", Style::default().fg(Color::Yellow)),
+            Span::styled("[?]", shortcut),
             Span::raw("help"),
         ]),
     ];
@@ -223,11 +228,12 @@ fn draw_right_panel(frame: &mut Frame, app: &App, area: Rect) {
 
 /// Draw the transcription panel.
 fn draw_transcription_panel(frame: &mut Frame, app: &App, area: Rect) {
+    let theme = &app.theme;
     let is_active = app.active_panel == ActivePanel::Transcription;
     let border_style = if is_active {
-        Style::default().fg(Color::Cyan)
+        theme.border_active_style()
     } else {
-        Style::default().fg(Color::DarkGray)
+        theme.border_inactive_style()
     };
 
     let block = Block::default()
@@ -249,26 +255,25 @@ fn draw_transcription_panel(frame: &mut Frame, app: &App, area: Rect) {
         app.current_transcription.clone()
     };
 
-    let paragraph = Paragraph::new(text)
-        .wrap(Wrap { trim: true })
-        .style(
-            Style::default().fg(if app.current_transcription.is_empty() {
-                Color::DarkGray
-            } else {
-                Color::White
-            }),
-        );
+    let style = if app.current_transcription.is_empty() {
+        theme.muted_style()
+    } else {
+        theme.text_style()
+    };
+
+    let paragraph = Paragraph::new(text).wrap(Wrap { trim: true }).style(style);
 
     frame.render_widget(paragraph, inner);
 }
 
 /// Draw the history panel.
 fn draw_history_panel(frame: &mut Frame, app: &App, area: Rect) {
+    let theme = &app.theme;
     let is_active = app.active_panel == ActivePanel::History;
     let border_style = if is_active {
-        Style::default().fg(Color::Cyan)
+        theme.border_active_style()
     } else {
-        Style::default().fg(Color::DarkGray)
+        theme.border_inactive_style()
     };
 
     let block = Block::default()
@@ -285,23 +290,19 @@ fn draw_history_panel(frame: &mut Frame, app: &App, area: Rect) {
         .enumerate()
         .map(|(i, entry)| {
             let style = if i == app.history_index && is_active {
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD)
+                theme.selected_style()
             } else {
                 Style::default()
             };
 
+            let timestamp_style = if i == app.history_index && is_active {
+                style
+            } else {
+                theme.text_dim_style()
+            };
+
             let content = Line::from(vec![
-                Span::styled(
-                    format!("{} ", entry.timestamp),
-                    style.fg(if i == app.history_index && is_active {
-                        Color::Black
-                    } else {
-                        Color::DarkGray
-                    }),
-                ),
+                Span::styled(format!("{} ", entry.timestamp), timestamp_style),
                 Span::styled(truncate_string(&entry.text, 50), style),
             ]);
 
@@ -314,7 +315,8 @@ fn draw_history_panel(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 /// Draw help overlay.
-fn draw_help_overlay(frame: &mut Frame) {
+fn draw_help_overlay(frame: &mut Frame, app: &App) {
+    let theme = &app.theme;
     let area = centered_rect(60, 70, frame.area());
 
     // Clear the area first
@@ -323,48 +325,37 @@ fn draw_help_overlay(frame: &mut Frame) {
     let block = Block::default()
         .title(" Help ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Yellow));
+        .border_style(theme.shortcut_style());
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
+    let bold = Style::default().add_modifier(Modifier::BOLD);
     let help_text = vec![
         Line::from(""),
-        Line::from(vec![Span::styled(
-            "Navigation",
-            Style::default().add_modifier(Modifier::BOLD),
-        )]),
+        Line::from(vec![Span::styled("Navigation", bold)]),
         Line::from("  Tab / Shift+Tab    Switch panels"),
         Line::from("  ↑/↓ or j/k         Navigate history"),
         Line::from(""),
-        Line::from(vec![Span::styled(
-            "Recording",
-            Style::default().add_modifier(Modifier::BOLD),
-        )]),
+        Line::from(vec![Span::styled("Recording", bold)]),
         Line::from("  r                  Start/stop recording"),
         Line::from("  s                  Stop recording"),
         Line::from(""),
-        Line::from(vec![Span::styled(
-            "Panels",
-            Style::default().add_modifier(Modifier::BOLD),
-        )]),
+        Line::from(vec![Span::styled("Panels", bold)]),
         Line::from("  h                  Open history"),
         Line::from("  m                  Open model manager"),
         Line::from("  c                  Open config"),
         Line::from("  i                  Open input selector"),
         Line::from("  o                  Open output config"),
         Line::from(""),
-        Line::from(vec![Span::styled(
-            "General",
-            Style::default().add_modifier(Modifier::BOLD),
-        )]),
+        Line::from(vec![Span::styled("General", bold)]),
         Line::from("  ?                  Toggle this help"),
         Line::from("  q                  Quit"),
         Line::from("  Ctrl+C             Quit"),
         Line::from(""),
         Line::from(vec![Span::styled(
             "Press Esc or ? to close",
-            Style::default().fg(Color::DarkGray),
+            theme.muted_style(),
         )]),
     ];
 

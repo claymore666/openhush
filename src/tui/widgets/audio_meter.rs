@@ -1,18 +1,7 @@
 //! Audio level meter widget using braille/block characters.
 
-use ratatui::{
-    buffer::Buffer,
-    layout::Rect,
-    style::{Color, Style},
-    widgets::Widget,
-};
-
-/// Braille characters for audio visualization.
-/// Each braille character can represent 2x4 dots (2 columns, 4 rows).
-const BRAILLE_PATTERNS: [char; 9] = [
-    ' ', '⣀', '⣤', '⣶', '⣿', // Bottom to top fill
-    '▁', '▂', '▃', '▄',
-];
+use crate::tui::theme::{audio_level_color, Theme};
+use ratatui::{buffer::Buffer, layout::Rect, style::Style, widgets::Widget};
 
 /// Block characters for simple bar display.
 const BLOCK_CHARS: [char; 9] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█', '█'];
@@ -21,8 +10,8 @@ const BLOCK_CHARS: [char; 9] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇',
 pub struct AudioMeter<'a> {
     /// Audio level history (0.0 to 1.0).
     levels: &'a [f32],
-    /// Use braille characters (more resolution) vs blocks.
-    use_braille: bool,
+    /// Theme for colors.
+    theme: Option<&'a Theme>,
 }
 
 impl<'a> AudioMeter<'a> {
@@ -30,14 +19,13 @@ impl<'a> AudioMeter<'a> {
     pub fn new(levels: &'a [f32]) -> Self {
         Self {
             levels,
-            use_braille: false,
+            theme: None,
         }
     }
 
-    /// Use braille characters for higher resolution.
-    #[allow(dead_code)]
-    pub fn braille(mut self) -> Self {
-        self.use_braille = true;
+    /// Set the theme for colors.
+    pub fn with_theme(mut self, theme: &'a Theme) -> Self {
+        self.theme = Some(theme);
         self
     }
 }
@@ -63,22 +51,23 @@ impl Widget for AudioMeter<'_> {
         for (x, &level) in samples.iter().enumerate() {
             let level = level.clamp(0.0, 1.0);
 
-            // Choose color based on level
-            let color = if level > 0.8 {
-                Color::Red
-            } else if level > 0.5 {
-                Color::Yellow
+            // Choose color based on level and theme
+            let color = if let Some(theme) = self.theme {
+                audio_level_color(level, theme)
             } else {
-                Color::Green
+                // Fallback colors if no theme
+                if level > 0.8 {
+                    ratatui::style::Color::Red
+                } else if level > 0.5 {
+                    ratatui::style::Color::Yellow
+                } else {
+                    ratatui::style::Color::Green
+                }
             };
 
             // Choose character based on level
             let char_index = (level * 8.0) as usize;
-            let ch = if self.use_braille {
-                BRAILLE_PATTERNS[char_index.min(4)]
-            } else {
-                BLOCK_CHARS[char_index.min(8)]
-            };
+            let ch = BLOCK_CHARS[char_index.min(8)];
 
             // Render at bottom of area
             let cell = buf.cell_mut((area.x + x as u16, area.y + area.height - 1));
