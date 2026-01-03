@@ -22,10 +22,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
-use wasapi::{
-    AudioCaptureClient, AudioClient, DeviceEnumerator, Direction, SampleType, StreamMode,
-    WaveFormat,
-};
+use wasapi::{DeviceEnumerator, Direction, SampleType, StreamMode, WaveFormat};
 
 /// Target sample rate for Whisper (16kHz)
 pub const SAMPLE_RATE: u32 = 16000;
@@ -222,7 +219,14 @@ fn run_capture_loop(
 
     // Request 32-bit float, stereo, 48kHz (common Windows format)
     // autoconvert will handle format conversion if needed
-    let desired_format = WaveFormat::new(32, 32, &SampleType::Float, NATIVE_SAMPLE_RATE, 2, None);
+    let desired_format = WaveFormat::new(
+        32,
+        32,
+        &SampleType::Float,
+        NATIVE_SAMPLE_RATE as usize,
+        2,
+        None,
+    );
     let blockalign = desired_format.get_blockalign();
     debug!("Desired capture format: {:?}", desired_format);
 
@@ -376,7 +380,11 @@ pub fn list_monitor_sources() -> Result<Vec<SourceInfo>, SystemAudioError> {
 
     let mut sources = Vec::new();
 
-    for device in &devices {
+    for device_result in &devices {
+        let device = match device_result {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
         let name = device.get_id().unwrap_or_default();
         let description = device
             .get_friendlyname()
