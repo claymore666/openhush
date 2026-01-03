@@ -1,7 +1,7 @@
 //! Event handling for the TUI.
 
 use crate::tui::AppResult;
-use crossterm::event::{self, Event as CrosstermEvent, KeyEvent, MouseEvent};
+use crossterm::event::{self, Event as CrosstermEvent, KeyEvent, KeyEventKind, MouseEvent};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -47,8 +47,11 @@ impl EventHandler {
                 if event::poll(timeout).unwrap_or(false) {
                     match event::read() {
                         Ok(CrosstermEvent::Key(key)) => {
-                            if sender_clone.send(Event::Key(key)).is_err() {
-                                return;
+                            // Only handle key press events, ignore release/repeat
+                            if key.kind == KeyEventKind::Press {
+                                if sender_clone.send(Event::Key(key)).is_err() {
+                                    return;
+                                }
                             }
                         }
                         Ok(CrosstermEvent::Mouse(mouse)) => {
