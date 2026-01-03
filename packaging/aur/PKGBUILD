@@ -1,6 +1,6 @@
 # Maintainer: OpenHush Team <christian.kamien@gmail.com>
 pkgname=openhush
-pkgver=0.7.0
+pkgver=0.8.0
 pkgrel=1
 pkgdesc="Open-source voice-to-text that acts as a seamless whisper keyboard"
 arch=('x86_64')

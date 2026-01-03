@@ -31,6 +31,7 @@ mod summarization;
 mod translation;
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 mod tray;
+mod tui;
 mod vad;
 mod vocabulary;
 
@@ -61,6 +62,9 @@ enum Commands {
 
     /// Open preferences GUI
     Preferences,
+
+    /// Launch terminal user interface (TUI)
+    Tui,
 
     /// Run the first-run setup wizard
     #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
@@ -469,6 +473,11 @@ async fn async_main(cli: Cli) -> anyhow::Result<()> {
         Commands::Preferences => {
             info!("Opening preferences...");
             gui::run_preferences()?;
+        }
+
+        Commands::Tui => {
+            info!("Launching TUI...");
+            tui::run()?;
         }
 
         #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]

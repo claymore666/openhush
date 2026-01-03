@@ -1,6 +1,6 @@
 [package]
 name = "openhush"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2021"
 authors = ["Christian Kamien <christian.kamien@gmail.com>"]
 description = "Open-source voice-to-text that acts as a seamless whisper keyboard"
@@ -110,6 +110,10 @@ image = "0.25"
 # GUI (preferences window)
 eframe = "0.29"
 egui = "0.29"
+
+# TUI (terminal user interface)
+ratatui = "0.29"
+crossterm = "0.28"
 
 # Open files/URLs
 open = "5"
