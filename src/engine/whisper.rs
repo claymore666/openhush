@@ -247,9 +247,14 @@ impl WhisperEngine {
             params.set_language(Some(&self.language));
         }
 
-        // Set translate mode (true = translate to English, false = transcribe in original language)
-        debug!("Setting translate={}", self.translate);
-        params.set_translate(self.translate);
+        // Set translate mode
+        // Note: whisper-rs has inverted logic - set_translate(false) enables translation
+        // So we invert our config value to get expected behavior
+        debug!(
+            "Setting translate={} (inverted to {})",
+            self.translate, !self.translate
+        );
+        params.set_translate(!self.translate);
 
         // Disable printing to avoid cluttering output
         params.set_print_special(false);

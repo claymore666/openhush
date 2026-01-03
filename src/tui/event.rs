@@ -48,10 +48,10 @@ impl EventHandler {
                     match event::read() {
                         Ok(CrosstermEvent::Key(key)) => {
                             // Only handle key press events, ignore release/repeat
-                            if key.kind == KeyEventKind::Press {
-                                if sender_clone.send(Event::Key(key)).is_err() {
-                                    return;
-                                }
+                            if key.kind == KeyEventKind::Press
+                                && sender_clone.send(Event::Key(key)).is_err()
+                            {
+                                return;
                             }
                         }
                         Ok(CrosstermEvent::Mouse(mouse)) => {
