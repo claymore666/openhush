@@ -45,8 +45,13 @@ impl IpcClientInner {
             }
         })?;
 
-        stream.set_read_timeout(Some(Duration::from_secs(30))).ok();
-        stream.set_write_timeout(Some(Duration::from_secs(5))).ok();
+        // Short timeouts for responsive TUI - don't block the UI
+        stream
+            .set_read_timeout(Some(Duration::from_millis(500)))
+            .ok();
+        stream
+            .set_write_timeout(Some(Duration::from_millis(500)))
+            .ok();
 
         let (response_tx, response_rx) = mpsc::channel();
 

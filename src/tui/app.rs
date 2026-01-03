@@ -4,7 +4,6 @@ use crate::ipc::{DaemonState, IpcEvent};
 use crate::tui::daemon::{ConnectionState, DaemonClient};
 use crate::tui::theme::Theme;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent};
-use tracing::debug;
 
 /// Application result type.
 pub type AppResult<T> = anyhow::Result<T>;
@@ -79,11 +78,9 @@ pub struct TranscriptionEntry {
 impl App {
     /// Create a new App instance.
     pub fn new() -> Self {
-        let mut daemon = DaemonClient::new();
-        // Try to connect on startup
-        if let Err(e) = daemon.connect() {
-            debug!("Initial daemon connection failed: {}", e);
-        }
+        // Don't connect here - let on_tick() handle it asynchronously
+        // This ensures the UI appears immediately
+        let daemon = DaemonClient::new();
 
         Self {
             running: true,

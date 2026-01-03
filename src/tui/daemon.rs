@@ -6,7 +6,6 @@
 use crate::ipc::{DaemonStatus, IpcClient, IpcCommand, IpcError, IpcEvent, IpcResponse};
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
-use tracing::{debug, info, warn};
 
 /// Connection state to the daemon.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,7 +76,6 @@ impl DaemonClient {
         match IpcClient::connect() {
             Ok(client) => {
                 self.client = Some(client);
-                info!("Connected to daemon via IPC");
 
                 // Subscribe to events
                 if let Some(ref mut c) = self.client {
@@ -85,10 +83,8 @@ impl DaemonClient {
                         Ok(rx) => {
                             self.event_rx = Some(rx);
                             self.state = ConnectionState::Connected;
-                            debug!("Subscribed to daemon events");
                         }
-                        Err(e) => {
-                            warn!("Failed to subscribe to events: {}", e);
+                        Err(_) => {
                             // Still connected, just no events
                             self.state = ConnectionState::Connected;
                         }
@@ -116,7 +112,6 @@ impl DaemonClient {
         self.client = None;
         self.event_rx = None;
         self.state = ConnectionState::Disconnected;
-        debug!("Disconnected from daemon");
     }
 
     /// Send a command and get response.
@@ -205,13 +200,10 @@ impl DaemonClient {
 
     /// Handle reconnection if needed.
     pub fn handle_reconnect(&mut self) {
-        if self.state == ConnectionState::Reconnecting
-            || self.state == ConnectionState::DaemonNotRunning
-        {
-            // Try to reconnect
-            if self.connect().is_ok() {
-                info!("Reconnected to daemon");
-            }
+        // Try to connect/reconnect in all non-connected states
+        if self.state != ConnectionState::Connected && self.state != ConnectionState::Connecting {
+            // Try to reconnect (connect() handles rate limiting)
+            let _ = self.connect();
         }
     }
 }
