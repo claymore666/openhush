@@ -80,9 +80,9 @@ impl IpcClientInner {
                 .flush()
                 .map_err(|e| IpcError::SendFailed(e.to_string()))?;
 
-            // Wait for response with matching ID
+            // Wait for response with matching ID (short timeout for responsive UI)
             loop {
-                match self.response_rx.recv_timeout(Duration::from_secs(30)) {
+                match self.response_rx.recv_timeout(Duration::from_millis(500)) {
                     Ok((resp_id, response)) if resp_id == id => return Ok(response),
                     Ok(_) => continue, // Wrong ID, keep waiting
                     Err(_) => {
