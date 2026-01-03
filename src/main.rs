@@ -1204,15 +1204,18 @@ async fn async_main(cli: Cli) -> anyhow::Result<()> {
                     RecordingAction::Status => match client.send(IpcCommand::Status) {
                         Ok(response) => {
                             if response.ok {
-                                let recording = response.recording.unwrap_or(false);
-                                let model = response.model_loaded.unwrap_or(false);
-                                let version = response.version.unwrap_or_default();
-                                println!(
-                                    "Status: {}",
-                                    if recording { "recording" } else { "idle" }
-                                );
-                                println!("Model loaded: {}", model);
-                                println!("Version: {}", version);
+                                if let Some(ipc::IpcResponseData::Status(status)) = response.data {
+                                    println!(
+                                        "Status: {}",
+                                        if status.state == ipc::DaemonState::Recording {
+                                            "recording"
+                                        } else {
+                                            "idle"
+                                        }
+                                    );
+                                    println!("Model loaded: {}", status.model_loaded);
+                                    println!("Version: {}", status.version);
+                                }
                             } else if let Some(err) = response.error {
                                 eprintln!("Failed to get status: {}", err);
                                 std::process::exit(1);
