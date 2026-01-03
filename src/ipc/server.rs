@@ -105,6 +105,27 @@ impl IpcServer {
         })
     }
 
+    /// Create and bind the IPC server (stub for non-Unix).
+    #[cfg(not(unix))]
+    pub fn new() -> Result<Self, IpcError> {
+        let (event_tx, event_rx) = std::sync::mpsc::channel();
+        let shutdown = Arc::new(AtomicBool::new(false));
+
+        let handle = IpcServerHandle {
+            event_tx,
+            shutdown: shutdown.clone(),
+        };
+
+        Ok(Self {
+            handle,
+            event_rx,
+            clients: Arc::new(Mutex::new(HashMap::new())),
+            next_client_id: AtomicU64::new(1),
+            command_handler: None,
+            thread: None,
+        })
+    }
+
     /// Get a handle for broadcasting events.
     pub fn handle(&self) -> IpcServerHandle {
         self.handle.clone()
@@ -234,6 +255,14 @@ impl IpcServer {
         commands
     }
 
+    /// Poll for incoming commands (stub for non-Unix).
+    #[cfg(not(unix))]
+    #[allow(clippy::type_complexity)]
+    pub fn poll(&self) -> Vec<(u64, IpcCommand, Box<dyn FnOnce(IpcResponse) + Send>)> {
+        // IPC not yet implemented on Windows
+        Vec::new()
+    }
+
     /// Mark a client as subscribed to events.
     pub fn subscribe_client(&self, client_id: u64) {
         if let Ok(mut clients) = self.clients.lock() {
@@ -283,11 +312,26 @@ impl IpcServer {
         }
     }
 
+    /// Broadcast an event to all subscribed clients (stub for non-Unix).
+    #[cfg(not(unix))]
+    pub fn broadcast_event(&self, _event: &IpcEvent) {
+        // IPC not yet implemented on Windows
+        debug!("IPC broadcast not implemented on this platform");
+    }
+
     /// Process pending broadcasts from the handle.
+    #[cfg(unix)]
     pub fn process_broadcasts(&self) {
         while let Ok(event) = self.event_rx.try_recv() {
             self.broadcast_event(&event);
         }
+    }
+
+    /// Process pending broadcasts from the handle (stub for non-Unix).
+    #[cfg(not(unix))]
+    pub fn process_broadcasts(&self) {
+        // IPC not yet implemented on Windows
+        while self.event_rx.try_recv().is_ok() {}
     }
 }
 
