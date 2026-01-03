@@ -108,7 +108,7 @@ notify-rust = "4"
 image = "0.25"
 
 # GUI (preferences window)
-eframe = "0.29"
+eframe = "0.33"
 egui = "0.29"
 
 # Open files/URLs
