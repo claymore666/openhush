@@ -21,7 +21,7 @@ use crossterm::{
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io::{self, stdout};
 use std::panic;
-use tracing::{debug, error, info};
+use tracing::error;
 
 /// Install a panic hook that restores the terminal before panicking.
 fn install_panic_hook() {
@@ -47,8 +47,6 @@ pub fn run() -> AppResult<()> {
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
-
-    info!("Starting OpenHush TUI");
 
     // Create app and run it
     let mut app = App::new();
@@ -89,8 +87,8 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
             Event::Mouse(mouse_event) => {
                 app.on_mouse(mouse_event);
             }
-            Event::Resize(width, height) => {
-                debug!("Terminal resized to {}x{}", width, height);
+            Event::Resize(_width, _height) => {
+                // Terminal resize is handled automatically by ratatui
             }
         }
     }

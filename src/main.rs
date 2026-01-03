@@ -350,7 +350,18 @@ struct LogGuard {
     _guard: Option<tracing_appender::non_blocking::WorkerGuard>,
 }
 
-fn init_logging(verbose: bool, foreground: bool, config_level: Option<&str>) -> LogGuard {
+/// Logging mode for different command contexts.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LogMode {
+    /// Log to stdout (foreground commands)
+    Stdout,
+    /// Log to file only (daemon mode)
+    File,
+    /// Log to file, no stdout (TUI mode - stdout is used for UI)
+    Tui,
+}
+
+fn init_logging(verbose: bool, mode: LogMode, config_level: Option<&str>) -> LogGuard {
     // Priority: RUST_LOG env > --verbose flag > config file > default
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         let level = if verbose {
@@ -367,7 +378,7 @@ fn init_logging(verbose: bool, foreground: bool, config_level: Option<&str>) -> 
         EnvFilter::new(format!("openhush={},whisper_rs={}", level, whisper_level))
     });
 
-    if foreground {
+    if mode == LogMode::Stdout {
         // Foreground mode: log to stdout with pretty formatting
         tracing_subscriber::registry()
             .with(filter)
@@ -440,17 +451,24 @@ fn main() -> anyhow::Result<()> {
 }
 
 async fn async_main(cli: Cli) -> anyhow::Result<()> {
-    // Determine if we're running in foreground mode for logging
-    let foreground_mode = match &cli.command {
-        Commands::Start { foreground, .. } => *foreground,
-        _ => true, // All other commands run in foreground
+    // Determine logging mode based on command
+    let log_mode = match &cli.command {
+        Commands::Start { foreground, .. } => {
+            if *foreground {
+                LogMode::Stdout
+            } else {
+                LogMode::File
+            }
+        }
+        Commands::Tui => LogMode::Tui, // TUI needs stdout for UI, log to file
+        _ => LogMode::Stdout,          // All other commands run in foreground
     };
 
     // Load config early to get log level (use default if config fails)
     let config_log_level = config::Config::load().ok().map(|c| c.logging.level);
 
     // Initialize logging (keep guard alive for the duration of the program)
-    let _log_guard = init_logging(cli.verbose, foreground_mode, config_log_level.as_deref());
+    let _log_guard = init_logging(cli.verbose, log_mode, config_log_level.as_deref());
 
     match cli.command {
         Commands::Start {
