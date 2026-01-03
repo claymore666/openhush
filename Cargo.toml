@@ -173,6 +173,12 @@ lto = true
 codegen-units = 1
 strip = true
 
+# Fast release builds for testing (optimized but quick to compile)
+[profile.release-fast]
+inherits = "release"
+lto = false
+codegen-units = 16
+
 # Package metadata for cargo-deb
 [package.metadata.deb]
 maintainer = "Christian Kamien <christian.kamien@gmail.com>"
