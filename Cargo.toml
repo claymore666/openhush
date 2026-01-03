@@ -109,7 +109,7 @@ image = "0.25"
 
 # GUI (preferences window)
 eframe = "0.29"
-egui = "0.29"
+egui = "0.33"
 
 # Open files/URLs
 open = "5"
