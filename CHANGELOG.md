@@ -2,9 +2,9 @@
 
 All notable changes to OpenHush are documented here.
 
-## [Unreleased]
+## [0.7.0] - 2026-01-03
 
-### System Audio Capture (All Platforms)
+### Platform Parity - System Audio Capture (All Platforms)
 
 - **Windows WASAPI Loopback** — Capture desktop audio (meetings, calls, media) via Windows Audio Session API
   - Works on Windows Vista and later
