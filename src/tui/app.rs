@@ -1,7 +1,10 @@
 //! Application state and logic for the TUI.
 
+use crate::ipc::{DaemonState, IpcEvent};
+use crate::tui::daemon::{ConnectionState, DaemonClient};
 use crate::tui::theme::Theme;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent};
+use tracing::debug;
 
 /// Application result type.
 pub type AppResult<T> = anyhow::Result<T>;
@@ -30,6 +33,8 @@ pub struct App {
     running: bool,
     /// Color theme
     pub theme: Theme,
+    /// Daemon client for IPC communication
+    pub daemon: DaemonClient,
     /// Currently active panel
     pub active_panel: ActivePanel,
     /// Recording state
@@ -58,6 +63,8 @@ pub struct App {
     pub llm_provider: String,
     /// Show help overlay
     pub show_help: bool,
+    /// Status message (for errors/info)
+    pub status_message: Option<String>,
 }
 
 /// A transcription history entry.
@@ -72,32 +79,23 @@ pub struct TranscriptionEntry {
 impl App {
     /// Create a new App instance.
     pub fn new() -> Self {
+        let mut daemon = DaemonClient::new();
+        // Try to connect on startup
+        if let Err(e) = daemon.connect() {
+            debug!("Initial daemon connection failed: {}", e);
+        }
+
         Self {
             running: true,
             theme: Theme::terminal_default(),
+            daemon,
             active_panel: ActivePanel::default(),
             recording_state: RecordingState::default(),
             recording_duration: 0.0,
             audio_level: 0.0,
             audio_history: vec![0.0; 32],
             current_transcription: String::new(),
-            history: vec![
-                TranscriptionEntry {
-                    timestamp: "14:32:05".to_string(),
-                    text: "Hello world, this is a test transcription".to_string(),
-                    duration_secs: 2.3,
-                },
-                TranscriptionEntry {
-                    timestamp: "14:31:42".to_string(),
-                    text: "Previous dictation appears here".to_string(),
-                    duration_secs: 1.8,
-                },
-                TranscriptionEntry {
-                    timestamp: "14:30:18".to_string(),
-                    text: "Older entries scroll down in the history panel".to_string(),
-                    duration_secs: 3.1,
-                },
-            ],
+            history: Vec::new(),
             history_index: 0,
             model_name: "large-v3".to_string(),
             language: "auto".to_string(),
@@ -105,7 +103,14 @@ impl App {
             llm_enabled: true,
             llm_provider: "ollama".to_string(),
             show_help: false,
+            status_message: None,
         }
+    }
+
+    /// Get the daemon connection state.
+    #[allow(dead_code)]
+    pub fn connection_state(&self) -> ConnectionState {
+        self.daemon.state()
     }
 
     /// Check if the application is still running.
@@ -120,18 +125,105 @@ impl App {
 
     /// Handle tick events (called periodically).
     pub fn on_tick(&mut self) {
-        // Simulate audio level changes for demo
-        if self.recording_state == RecordingState::Recording {
-            self.recording_duration += 0.25;
-            // Simulate audio level
-            self.audio_level = (self.recording_duration * 3.0).sin().abs() * 0.7 + 0.1;
+        // Handle daemon reconnection
+        self.daemon.handle_reconnect();
+
+        // Process daemon events
+        for event in self.daemon.poll_events() {
+            self.handle_daemon_event(event);
+        }
+
+        // Update from daemon status if connected
+        if self.daemon.is_connected() {
+            if let Some(status) = self.daemon.last_status() {
+                self.model_name = status.model.clone();
+                self.recording_state = match status.state {
+                    DaemonState::Idle => RecordingState::Idle,
+                    DaemonState::Recording => RecordingState::Recording,
+                    DaemonState::Processing => RecordingState::Processing,
+                };
+                if let Some(dur) = status.recording_duration {
+                    self.recording_duration = dur as f32;
+                }
+            }
         } else {
-            self.audio_level *= 0.9; // Decay when not recording
+            // Simulate audio level changes for demo when not connected
+            if self.recording_state == RecordingState::Recording {
+                self.recording_duration += 0.25;
+                self.audio_level = (self.recording_duration * 3.0).sin().abs() * 0.7 + 0.1;
+            } else {
+                self.audio_level *= 0.9;
+            }
         }
 
         // Update audio history
         self.audio_history.remove(0);
         self.audio_history.push(self.audio_level);
+    }
+
+    /// Handle a daemon event.
+    fn handle_daemon_event(&mut self, event: IpcEvent) {
+        match event {
+            IpcEvent::AudioLevel {
+                rms_db,
+                peak_db: _,
+                vad_active: _,
+            } => {
+                // Convert dB to linear (0.0 to 1.0)
+                // rms_db is typically -60 to 0
+                self.audio_level = ((rms_db + 60.0) / 60.0).clamp(0.0, 1.0);
+            }
+            IpcEvent::RecordingStarted {
+                recording_id: _,
+                timestamp: _,
+            } => {
+                self.recording_state = RecordingState::Recording;
+                self.recording_duration = 0.0;
+                self.current_transcription.clear();
+            }
+            IpcEvent::RecordingStopped {
+                recording_id: _,
+                duration_secs,
+            } => {
+                self.recording_duration = duration_secs as f32;
+                self.recording_state = RecordingState::Processing;
+            }
+            IpcEvent::TranscriptionStarted { recording_id: _ } => {
+                self.recording_state = RecordingState::Processing;
+            }
+            IpcEvent::TranscriptionComplete {
+                id: _,
+                recording_id: _,
+                text,
+                duration_secs,
+                llm_corrected: _,
+            } => {
+                self.current_transcription = text.clone();
+                self.history.insert(
+                    0,
+                    TranscriptionEntry {
+                        timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
+                        text,
+                        duration_secs: duration_secs as f32,
+                    },
+                );
+                self.recording_state = RecordingState::Idle;
+            }
+            IpcEvent::StateChanged { state } => {
+                self.recording_state = match state {
+                    DaemonState::Idle => RecordingState::Idle,
+                    DaemonState::Recording => RecordingState::Recording,
+                    DaemonState::Processing => RecordingState::Processing,
+                };
+            }
+            IpcEvent::Error { code: _, message } => {
+                self.status_message = Some(message);
+            }
+            IpcEvent::Shutdown => {
+                self.status_message = Some("Daemon shutting down".to_string());
+            }
+            _ => {}
+        }
     }
 
     /// Handle key events.
@@ -227,29 +319,41 @@ impl App {
 
     /// Toggle recording state.
     fn toggle_recording(&mut self) {
-        match self.recording_state {
-            RecordingState::Idle => {
-                self.recording_state = RecordingState::Recording;
-                self.recording_duration = 0.0;
-                self.current_transcription.clear();
+        if self.daemon.is_connected() {
+            // Use daemon to toggle
+            if let Err(e) = self.daemon.toggle_recording() {
+                self.status_message = Some(format!("Recording error: {}", e));
             }
-            RecordingState::Recording => {
-                self.stop_recording();
-            }
-            RecordingState::Processing => {
-                // Can't toggle while processing
+        } else {
+            // Local simulation when daemon not connected
+            match self.recording_state {
+                RecordingState::Idle => {
+                    self.recording_state = RecordingState::Recording;
+                    self.recording_duration = 0.0;
+                    self.current_transcription.clear();
+                }
+                RecordingState::Recording => {
+                    self.stop_recording();
+                }
+                RecordingState::Processing => {
+                    // Can't toggle while processing
+                }
             }
         }
     }
 
     /// Stop recording and start processing.
     fn stop_recording(&mut self) {
-        if self.recording_state == RecordingState::Recording {
+        if self.daemon.is_connected() {
+            // Use daemon to stop
+            if let Err(e) = self.daemon.stop_recording() {
+                self.status_message = Some(format!("Stop recording error: {}", e));
+            }
+        } else if self.recording_state == RecordingState::Recording {
+            // Local simulation
             self.recording_state = RecordingState::Processing;
-            // Simulate transcription result
             self.current_transcription =
-                "This is a simulated transcription result from the recording.".to_string();
-            // Add to history
+                "This is a simulated transcription (daemon not connected).".to_string();
             self.history.insert(
                 0,
                 TranscriptionEntry {

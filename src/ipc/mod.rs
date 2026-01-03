@@ -1,10 +1,12 @@
-//! Cross-platform IPC for daemon control on macOS and Windows.
+//! Cross-platform IPC for daemon communication.
 //!
-//! Linux uses D-Bus (see dbus module). This module provides alternatives:
+//! Provides unified IPC on all platforms:
+//! - Linux: Unix domain sockets (D-Bus is also available separately)
 //! - macOS: Unix domain sockets
 //! - Windows: Named pipes
+//!
+//! Supports both request/response and push notifications (events).
 
-use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use thiserror::Error;
 
@@ -13,12 +15,15 @@ mod named_pipe;
 #[cfg(unix)]
 mod unix_socket;
 
-#[cfg(windows)]
-pub use named_pipe::{IpcClient, IpcServer};
-#[cfg(unix)]
-pub use unix_socket::{IpcClient, IpcServer};
+mod server;
+mod types;
+
+#[allow(unused_imports)]
+pub use server::{IpcServer, IpcServerHandle};
+pub use types::*;
 
 #[derive(Error, Debug)]
+#[allow(dead_code)]
 pub enum IpcError {
     #[error("Failed to bind: {0}")]
     BindFailed(String),
@@ -35,84 +40,14 @@ pub enum IpcError {
     #[error("Daemon not running")]
     NotRunning,
 
+    #[error("Connection closed")]
+    ConnectionClosed,
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
-}
 
-/// Commands sent to daemon.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "cmd")]
-pub enum IpcCommand {
-    #[serde(rename = "status")]
-    Status,
-    #[serde(rename = "stop")]
-    Stop,
-    /// Load the Whisper model into GPU memory
-    #[serde(rename = "load_model")]
-    LoadModel,
-    /// Unload the Whisper model to free GPU memory
-    #[serde(rename = "unload_model")]
-    UnloadModel,
-    /// Start recording audio
-    #[serde(rename = "start_recording")]
-    StartRecording,
-    /// Stop recording audio
-    #[serde(rename = "stop_recording")]
-    StopRecording,
-    /// Toggle recording state
-    #[serde(rename = "toggle_recording")]
-    ToggleRecording,
-}
-
-/// Response from daemon.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct IpcResponse {
-    pub ok: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub running: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub recording: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub model_loaded: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub version: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-}
-
-impl IpcResponse {
-    pub fn ok() -> Self {
-        Self {
-            ok: true,
-            running: None,
-            recording: None,
-            model_loaded: None,
-            version: None,
-            error: None,
-        }
-    }
-
-    pub fn status(recording: bool, model_loaded: bool) -> Self {
-        Self {
-            ok: true,
-            running: Some(true),
-            recording: Some(recording),
-            model_loaded: Some(model_loaded),
-            version: Some(env!("CARGO_PKG_VERSION").to_string()),
-            error: None,
-        }
-    }
-
-    pub fn error(msg: &str) -> Self {
-        Self {
-            ok: false,
-            running: None,
-            recording: None,
-            model_loaded: None,
-            version: None,
-            error: Some(msg.to_string()),
-        }
-    }
+    #[error("Serialization error: {0}")]
+    Serialization(String),
 }
 
 /// Get the IPC socket/pipe path.
@@ -126,5 +61,41 @@ pub fn ipc_path() -> PathBuf {
     #[cfg(windows)]
     {
         PathBuf::from(r"\\.\pipe\openhush")
+    }
+}
+
+/// IPC client for TUI/GUI communication with daemon.
+pub struct IpcClient {
+    #[cfg(unix)]
+    inner: unix_socket::IpcClientInner,
+    #[cfg(windows)]
+    inner: named_pipe::IpcClientInner,
+}
+
+#[allow(dead_code)]
+impl IpcClient {
+    /// Connect to the daemon.
+    pub fn connect() -> Result<Self, IpcError> {
+        #[cfg(unix)]
+        let inner = unix_socket::IpcClientInner::connect()?;
+        #[cfg(windows)]
+        let inner = named_pipe::IpcClientInner::connect()?;
+
+        Ok(Self { inner })
+    }
+
+    /// Send a command and wait for response.
+    pub fn send(&mut self, cmd: IpcCommand) -> Result<IpcResponse, IpcError> {
+        self.inner.send(cmd)
+    }
+
+    /// Subscribe to events. Returns a receiver for events.
+    pub fn subscribe(&mut self) -> Result<std::sync::mpsc::Receiver<IpcEvent>, IpcError> {
+        self.inner.subscribe()
+    }
+
+    /// Check if there are pending events (non-blocking).
+    pub fn try_recv_event(&mut self) -> Option<IpcEvent> {
+        self.inner.try_recv_event()
     }
 }

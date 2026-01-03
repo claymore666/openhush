@@ -4,6 +4,7 @@
 //! Features real-time audio levels, transcription display, and keyboard-driven navigation.
 
 mod app;
+mod daemon;
 mod event;
 pub mod theme;
 mod ui;
