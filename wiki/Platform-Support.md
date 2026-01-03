@@ -116,7 +116,7 @@ This document tracks feature availability across all supported platforms.
 | App-aware profiles | ✅ | ✅ | ✅ | Closed |
 | Plugin system | ❌ | ❌ | ❌ | [#93](https://github.com/claymore666/openhush/issues/93) |
 | Wake word detection | ✅ | ✅ | ✅ | Closed |
-| System audio capture | ✅ | ✅ | ❌ | Closed |
+| System audio capture | ✅ | ✅ | ✅ | Closed |
 
 ---
 
@@ -190,7 +190,9 @@ This document tracks feature availability across all supported platforms.
    - Extensible architecture for community extensions
 
 14. ~~**System Audio Capture**~~ ✅
-   - PulseAudio/PipeWire monitor sources for meeting transcription (Linux only)
+   - Linux: PulseAudio/PipeWire monitor sources
+   - macOS: ScreenCaptureKit (macOS 13+, Intel and Apple Silicon)
+   - Windows: WASAPI loopback capture
 
 ---
 
@@ -219,6 +221,14 @@ This document tracks feature availability across all supported platforms.
 | Linux | AppArmor, SELinux, Firejail | ✅ Implemented |
 | macOS | App Sandbox (future) | ❌ Not implemented |
 | Windows | N/A | N/A |
+
+### System Audio Capture
+
+| Platform | Library | Notes |
+|----------|---------|-------|
+| Linux | `libpulse` (PulseAudio) | Monitor sources from PipeWire/PulseAudio |
+| macOS | `screencapturekit` | macOS 13+, requires Screen Recording permission |
+| Windows | `wasapi` (WASAPI) | Loopback capture from render device |
 
 ### Hotkey Handling
 
