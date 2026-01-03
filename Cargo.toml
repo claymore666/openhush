@@ -129,7 +129,7 @@ async-trait = "0.1.89"
 
 # Unix process management
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.29", features = ["signal", "process", "fs"] }
+nix = { version = "0.30", features = ["signal", "process", "fs"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # System tray via D-Bus StatusNotifierItem (no GTK required)
