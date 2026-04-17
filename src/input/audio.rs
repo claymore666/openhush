@@ -515,8 +515,7 @@ impl AudioRecorder {
         let device = if let Some(id) = device_id {
             Self::find_device_by_id(&host, id)?
         } else {
-            host.default_input_device()
-                .ok_or(AudioRecorderError::NoInputDevice)?
+            Self::pick_default_microphone(&host)?
         };
 
         let device_name = device
@@ -611,17 +610,46 @@ impl AudioRecorder {
         Ok(())
     }
 
-    /// List available audio input devices.
+    /// List available audio input devices (microphones only — monitor sources excluded).
     #[allow(dead_code)]
     pub fn list_devices() -> Vec<String> {
         let host = cpal::default_host();
         host.input_devices()
             .map(|devices| {
                 devices
+                    .filter(|d| !is_monitor_device(d))
                     .filter_map(|d| d.description().ok().map(|desc| desc.name().to_string()))
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    /// Pick the default microphone, skipping monitor/loopback sources.
+    ///
+    /// PulseAudio/PipeWire exposes monitor sources (system audio loopback) as
+    /// regular input devices. cpal's `default_input_device()` can fall back to
+    /// one when no real mic is active, which would cause the recorder to
+    /// capture desktop audio. We explicitly filter those out.
+    fn pick_default_microphone(host: &cpal::Host) -> Result<Device, AudioRecorderError> {
+        // Try the system default first — only accept it if it's not a monitor.
+        if let Some(default) = host.default_input_device() {
+            if !is_monitor_device(&default) {
+                return Ok(default);
+            }
+            warn!("System default input is a monitor source; searching for a real microphone");
+        }
+
+        let devices = host
+            .input_devices()
+            .map_err(|e| AudioRecorderError::NoInputConfig(e.to_string()))?;
+
+        for device in devices {
+            if !is_monitor_device(&device) {
+                return Ok(device);
+            }
+        }
+
+        Err(AudioRecorderError::NoInputDevice)
     }
 
     /// Find an audio input device by ID.
@@ -793,10 +821,8 @@ impl AudioRecorder {
 
         let host = cpal::default_host();
 
-        // Try to get a new default device
-        let device = host
-            .default_input_device()
-            .ok_or(AudioRecorderError::NoInputDevice)?;
+        // Try to get a new default device (skipping monitor sources)
+        let device = Self::pick_default_microphone(&host)?;
 
         let device_name = device
             .description()
@@ -851,6 +877,19 @@ impl AudioRecorder {
 
         Ok(device_name)
     }
+}
+
+/// Detect whether a cpal device is actually a monitor/loopback source.
+///
+/// On PulseAudio/PipeWire these appear as input devices with names ending in
+/// ".monitor" or prefixed with "Monitor of". We never want to pick one as a
+/// microphone — doing so would capture desktop audio instead of the user's voice.
+fn is_monitor_device(device: &Device) -> bool {
+    let Ok(desc) = device.description() else {
+        return false;
+    };
+    let name = desc.name();
+    name.ends_with(".monitor") || name.starts_with("Monitor of ") || name.contains(".monitor.")
 }
 
 /// Check if any audio input device is available
