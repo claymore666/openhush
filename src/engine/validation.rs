@@ -6,7 +6,7 @@
 use thiserror::Error;
 
 /// Maximum audio duration in seconds (5 minutes)
-pub const MAX_AUDIO_DURATION_SECS: f32 = 300.0;
+pub const MAX_AUDIO_DURATION_SECS: f32 = 7200.0;
 
 /// Minimum audio duration in seconds (100ms)
 pub const MIN_AUDIO_DURATION_SECS: f32 = 0.1;
