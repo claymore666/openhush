@@ -232,6 +232,32 @@ jobs:
           path: openhush-*.deb
           if-no-files-found: error
 
+  # ==========================
+  # Verify Linux Package (.deb)
+  # ==========================
+  # A green package-linux job only proves a file was produced. v0.8.0
+  # shipped a .deb that installed cleanly and then refused to start
+  # because its Depends were incomplete. This gate installs the package
+  # in clean containers and runs the binary before anything is released.
+  verify-linux-package:
+    needs: package-linux
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Download .deb artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: openhush-deb
+          path: artifact
+
+      - name: Install and run the package in clean containers
+        run: |
+          chmod +x packaging/verify-deb.sh
+          packaging/verify-deb.sh artifact/openhush-*.deb
+
   # ===================
   # macOS Package (.dmg)
   # ===================
@@ -387,7 +413,7 @@ jobs:
   # Create GitHub Release
   # ===================
   release:
-    needs: [build, package-linux, package-macos, package-windows]
+    needs: [build, package-linux, verify-linux-package, package-macos, package-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write

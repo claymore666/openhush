@@ -143,6 +143,41 @@ assets/icons/
 
 ---
 
+## Verifying Packages
+
+A green packaging job only proves a file was produced, not that it works.
+The v0.8.0 `.deb` installed cleanly and then refused to start, because its
+`Depends` omitted `libpulse0`, `libx11-6` and `libxtst6`. Always verify the
+artifact, never the checkmark.
+
+### Debian/Ubuntu (.deb) — automated
+
+```bash
+# Defaults to ubuntu:22.04 (the build target) and debian:13
+packaging/verify-deb.sh path/to/openhush-v0.8.0-amd64.deb
+
+# Or against specific images
+packaging/verify-deb.sh openhush.deb ubuntu:24.04 debian:12
+```
+
+Requires `docker`. For each image it installs the package **via apt**, so
+declared dependencies must actually resolve — `dpkg -i` would leave them
+unsatisfied and hide exactly this class of bug. It then checks `ldd` reports
+no missing libraries and that `--version`, `--help` and `config --show` all
+work. Exits non-zero on the first failure.
+
+This runs automatically in `release.yml` as the `verify-linux-package` job,
+which gates the `release` job: if the package does not install and run, no
+release is created.
+
+### macOS (.dmg) and Windows (.msi) — manual
+
+Not yet automated; both need a real OS. A macOS VM is documented in
+`wiki/Platform-Support.md` (OSX-KVM). At minimum, confirm the image mounts,
+the binary launches, and it reports the expected version.
+
+---
+
 ## Release Checklist
 
 Before releasing a new version:
@@ -154,21 +189,30 @@ Before releasing a new version:
    - `packaging/flatpak/org.openhush.OpenHush.yml`
    - `packaging/flatpak/org.openhush.OpenHush.metainfo.xml`
    - `packaging/homebrew/openhush.rb`
+   - `packaging/homebrew/openhush.cask.rb`
    - `packaging/windows/openhush.wxs`
+   - `packaging/windows/build-msi.ps1`
+   - `packaging/macos/build-dmg.sh`
 
 2. **Update Checksums:**
-   - SHA256 in PKGBUILD
-   - SHA256 in Homebrew formula
 
-3. **Test Builds:**
-   - Flatpak on Ubuntu
-   - AUR on Arch
-   - Deb on Debian/Ubuntu
-   - DMG on macOS
-   - MSI on Windows
+   Only possible once the tag exists, since the digests cover the published
+   source archive and artifacts. Re-tagging invalidates them — recompute if
+   the tag moves.
+   - SHA256 in PKGBUILD (source archive)
+   - SHA256 in Homebrew formula (source archive)
+   - SHA256 in Homebrew cask (the built `.dmg`)
+
+3. **Verify Packages:**
+   - `.deb` — automatic via `verify-linux-package`; run `packaging/verify-deb.sh`
+     locally to reproduce
+   - `.dmg` on macOS — manual
+   - `.msi` on Windows — manual
+   - Flatpak on Ubuntu, AUR on Arch
 
 4. **Upload Artifacts:**
-   - Attach .deb, .dmg, .msi to GitHub Release
+   - `release.yml` attaches .deb, .dmg, .msi automatically and creates the
+     release as a **draft** — inspect, then publish by hand
    - Update Flathub PR
    - Update AUR package
 
