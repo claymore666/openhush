@@ -3,9 +3,11 @@
 
 cask "openhush" do
   version "0.8.0"
-  sha256 "PLACEHOLDER_SHA256"  # Update with actual SHA256 on release
+  sha256 "52882913ac51b26d1414db247022ad73b228c9bc32a070a5e6e08c11f7f5db25"
 
-  url "https://github.com/claymore666/openhush/releases/download/v#{version}/OpenHush-#{version}-macos-universal.dmg"
+  # Filename must match what release.yml actually uploads:
+  # openhush-v<version>-macos-universal.dmg
+  url "https://github.com/claymore666/openhush/releases/download/v#{version}/openhush-v#{version}-macos-universal.dmg"
   name "OpenHush"
   desc "Open-source voice-to-text that acts as a seamless whisper keyboard"
   homepage "https://github.com/claymore666/openhush"

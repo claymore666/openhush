@@ -27,7 +27,7 @@ optdepends=(
 provides=('openhush')
 conflicts=('openhush-git')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/claymore666/openhush/archive/v$pkgver.tar.gz")
-sha256sums=('SKIP')
+sha256sums=('5a210a9cfdd63c7a4fa8300b377996886a91fdffe93dc3108b6b2813194f9c20')
 
 prepare() {
     cd "$pkgname-$pkgver"
