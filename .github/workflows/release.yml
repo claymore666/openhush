@@ -363,14 +363,27 @@ jobs:
               <string>${VERSION}</string>
               <key>CFBundlePackageType</key>
               <string>APPL</string>
+              <!-- The binary hard-links ScreenCaptureKit (LC_LOAD_DYLIB, not
+                   weak), so dyld refuses to start it where that framework is
+                   absent. It arrived in macOS 12.3, and the system audio
+                   capture built on it is documented as needing 13+. Claiming
+                   11.0 let the app install where it cannot launch. Keep in
+                   sync with packaging/macos/build-dmg.sh. -->
               <key>LSMinimumSystemVersion</key>
-              <string>11.0</string>
+              <string>13.0</string>
               <key>LSUIElement</key>
               <true/>
               <key>NSHighResolutionCapable</key>
               <true/>
               <key>NSMicrophoneUsageDescription</key>
               <string>OpenHush needs microphone access for voice-to-text transcription.</string>
+              <!-- src/context.rs shells out to osascript to read the frontmost
+                   application. That sends Apple Events, and macOS terminates a
+                   bundled app that does so without this key. It was present in
+                   packaging/macos/build-dmg.sh but missing here, and this is
+                   the plist the release actually ships. -->
+              <key>NSAppleEventsUsageDescription</key>
+              <string>OpenHush needs to query the frontmost application to adapt transcription to its context.</string>
           </dict>
           </plist>
           EOF
