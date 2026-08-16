@@ -345,7 +345,10 @@ jobs:
       - name: Install WiX Toolset
         shell: pwsh
         run: |
-          dotnet tool install --global wix
+          # Pinned: WiX v7 refuses to build until the Open Source Maintenance
+          # Fee EULA is accepted (WIX7015). v6 is the last version without that
+          # gate. Unpinning is what silently moved us onto v7 mid-release.
+          dotnet tool install --global wix --version 6.0.2
 
       - name: Build MSI
         shell: pwsh
