@@ -4,7 +4,8 @@
   Build with: wix build openhush.wxs -o openhush.msi
   Or use cargo-wix: cargo wix
 -->
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <Package Name="OpenHush"
            Manufacturer="OpenHush Team"
            Version="0.8.0"
@@ -41,7 +42,6 @@
                     Directory="ApplicationProgramsFolder"
                     Description="Open-source voice-to-text"
                     WorkingDirectory="BinFolder"
-                    Icon="openhush.ico"
                     Advertise="yes" />
         </File>
 
@@ -56,8 +56,10 @@
       </Component>
     </ComponentGroup>
 
-    <!-- Icon for shortcuts -->
-    <Icon Id="openhush.ico" SourceFile="$(var.SourceDir)\openhush.ico" />
+    <!-- No Icon element: the repository ships no openhush.ico, and an
+         advertised shortcut without one falls back to the icon embedded in
+         its KeyPath file (openhush.exe). Add one back here if a real .ico
+         is ever committed. -->
 
     <!-- Features -->
     <Feature Id="ProductFeature" Title="OpenHush" Level="1">
@@ -70,15 +72,16 @@
                   ExeCommand="preferences"
                   Return="asyncNoWait" />
 
-    <!-- UI -->
+    <!-- UI. The dialog set is referenced through ui:WixUI rather than UIRef:
+         the WixUI symbols are internal to the extension in WiX v4+, so UIRef
+         fails to link with "inaccessible due to its protection level". -->
+    <ui:WixUI Id="WixUI_Minimal" />
     <UI>
-      <UIRef Id="WixUI_Minimal" />
       <Publish Dialog="ExitDialog"
                Control="Finish"
                Event="DoAction"
-               Value="LaunchApplication">
-        WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed
-      </Publish>
+               Value="LaunchApplication"
+               Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed" />
     </UI>
 
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch OpenHush" />

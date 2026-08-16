@@ -349,6 +349,8 @@ jobs:
           # Fee EULA is accepted (WIX7015). v6 is the last version without that
           # gate. Unpinning is what silently moved us onto v7 mid-release.
           dotnet tool install --global wix --version 6.0.2
+          # WixUI_Minimal lives in the UI extension, which is not built in.
+          wix extension add -g WixToolset.UI.wixext/6.0.2
 
       - name: Build MSI
         shell: pwsh
@@ -366,6 +368,7 @@ jobs:
           # Build MSI
           cd packaging\windows
           wix build openhush.wxs `
+              -ext WixToolset.UI.wixext `
               -d SourceDir="." `
               -d Version="$version" `
               -o "..\..\openhush-${{ github.ref_name }}-x64.msi"
