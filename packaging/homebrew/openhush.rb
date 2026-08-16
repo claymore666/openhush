@@ -2,7 +2,7 @@ class Openhush < Formula
   desc "Open-source voice-to-text that acts as a seamless whisper keyboard"
   homepage "https://github.com/claymore666/openhush"
   url "https://github.com/claymore666/openhush/archive/refs/tags/v0.8.0.tar.gz"
-  sha256 "01c06b57c269593efda2cba6240c4256c225b82b9cf580eb39508478f7089f13"
+  sha256 "bdfc8d3a7ba74aa944674a25800f4dc6158a1fec019d1186d40d2bf1494a8b81"
   license "MIT"
   head "https://github.com/claymore666/openhush.git", branch: "main"
 

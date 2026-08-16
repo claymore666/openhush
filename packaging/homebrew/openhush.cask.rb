@@ -3,7 +3,7 @@
 
 cask "openhush" do
   version "0.8.0"
-  sha256 "471096be71bf36913a79026e5a5befd357127417f5e109b981e54511f6906308"
+  sha256 "4966ddea71d58c843ae3a546c04d8e62ab607482ede1a529b2d562432275fc20"
 
   # Filename must match what release.yml actually uploads:
   # openhush-v<version>-macos-universal.dmg
