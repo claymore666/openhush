@@ -89,6 +89,39 @@
   </screenshots>
 
   <releases>
+    <release version="0.8.0" date="2026-08-16">
+      <description>
+        <p>v0.8.0 - Terminal User Interface</p>
+        <ul>
+          <li>Lazygit-style terminal user interface with live audio meter</li>
+          <li>Unified IPC with event subscriptions and audio level streaming</li>
+          <li>Maximum audio duration raised from 5 minutes to 2 hours</li>
+          <li>Microphone selection no longer falls back to monitor sources</li>
+        </ul>
+      </description>
+    </release>
+    <release version="0.7.0" date="2026-01-03">
+      <description>
+        <p>v0.7.0 - Platform Parity for System Audio Capture</p>
+        <ul>
+          <li>Windows system audio capture via WASAPI loopback</li>
+          <li>macOS system audio capture via ScreenCaptureKit (macOS 13+)</li>
+          <li>Cross-platform recording module</li>
+        </ul>
+      </description>
+    </release>
+    <release version="0.6.0" date="2025-12-31">
+      <description>
+        <p>v0.6.0 - Advanced Features and Extensibility</p>
+        <ul>
+          <li>Wake word detection via openWakeWord ONNX models</li>
+          <li>Real-time translation with M2M-100</li>
+          <li>Meeting summarization with configurable LLM backends</li>
+          <li>REST API with Swagger UI</li>
+          <li>Post-transcription actions and app-aware profiles</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.5.0" date="2025-12-26">
       <description>
         <p>v0.5.0 - Linux Desktop Integration</p>

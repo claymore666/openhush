@@ -1,3 +1,32 @@
+openhush (0.8.0-1) unstable; urgency=medium
+
+  * Lazygit-style terminal user interface (TUI)
+  * Unified IPC with event subscriptions and audio level streaming
+  * Maximum audio duration raised from 5 minutes to 2 hours
+  * Fixed microphone selection skipping PulseAudio monitor sources
+  * Fixed inverted translation flag
+
+ -- OpenHush Team <christian.kamien@gmail.com>  Sun, 16 Aug 2026 10:00:00 +0200
+
+openhush (0.7.0-1) unstable; urgency=medium
+
+  * Windows system audio capture via WASAPI loopback
+  * macOS system audio capture via ScreenCaptureKit (macOS 13+)
+  * Cross-platform recording module
+
+ -- OpenHush Team <christian.kamien@gmail.com>  Sat, 03 Jan 2026 10:00:00 +0100
+
+openhush (0.6.0-1) unstable; urgency=medium
+
+  * Wake word detection via openWakeWord ONNX models
+  * Real-time translation with M2M-100
+  * Meeting summarization with configurable LLM backends
+  * System audio capture via PulseAudio/PipeWire monitor sources
+  * REST API with Swagger UI
+  * Post-transcription actions and app-aware profiles
+
+ -- OpenHush Team <christian.kamien@gmail.com>  Wed, 31 Dec 2025 10:00:00 +0100
+
 openhush (0.5.0-1) unstable; urgency=medium
 
   * Initial Debian package release

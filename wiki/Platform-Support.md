@@ -62,6 +62,12 @@ This document tracks feature availability across all supported platforms.
 | D-Bus control | ✅ | N/A | N/A | - |
 | IPC control (pipes/socket) | N/A | ✅ | ✅ | Closed |
 | Autostart (service install) | ✅ | ✅ | ✅ | Closed |
+| IPC event subscriptions | ✅ | ✅ | ❌ | #198 |
+| Audio level streaming (20Hz) | ✅ | ✅ | ❌ | #198 |
+
+The event-broadcasting server (`IpcServer`) is backed by a Unix socket. On
+Windows the daemon side compiles to no-op stubs, so subscriptions and audio
+level streaming are unavailable there.
 
 ---
 
@@ -71,6 +77,23 @@ This document tracks feature availability across all supported platforms.
 |---------|-------|-------|---------|-------|
 | Preferences dialog | ✅ | ✅ | ✅ | Closed |
 | Onboarding wizard | ✅ | ✅ | ✅ | Closed |
+
+---
+
+## Terminal UI (TUI)
+
+| Feature | Linux | macOS | Windows | Issue |
+|---------|-------|-------|---------|-------|
+| Dashboard layout | ✅ | ✅ | ✅ | #171 |
+| Keyboard navigation and help overlay | ✅ | ✅ | ✅ | #171 |
+| Colour themes (terminal/dark/light) | ✅ | ✅ | ✅ | #171 |
+| Panic handler (terminal restore) | ✅ | ✅ | ✅ | #171 |
+| Live daemon connection | ✅ | ✅ | ❌ | #198 |
+| Real-time audio level meter | ✅ | ✅ | ❌ | #198 |
+
+The TUI itself renders on every platform. The panels that show live state
+depend on the daemon-side IPC server, so on Windows the interface starts but
+stays disconnected until that server gains a named-pipe backend.
 
 ---
 
