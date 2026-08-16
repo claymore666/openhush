@@ -328,8 +328,7 @@ fn spawn_m2m100_download(model: M2M100Model) {
         let mut last_percent = 0u64;
         let result = download_m2m100_model(model, |filename, downloaded, total| {
             // Log progress every 10%
-            if total > 0 {
-                let percent = (downloaded * 100) / total;
+            if let Some(percent) = (downloaded * 100).checked_div(total) {
                 if percent >= last_percent + 10 {
                     last_percent = percent;
                     info!("M2M-100 download: {} - {}%", filename, percent);

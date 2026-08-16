@@ -172,7 +172,7 @@ impl VocabularyManager {
         }
 
         // Sort by pattern length (longest first) for correct matching
-        rules.sort_by(|a, b| b.pattern.len().cmp(&a.pattern.len()));
+        rules.sort_by_key(|rule| std::cmp::Reverse(rule.pattern.len()));
 
         info!(
             "Loaded {} vocabulary rules from {} sections",

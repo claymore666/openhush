@@ -45,26 +45,23 @@ impl EventHandler {
 
                 // Poll for events with timeout
                 if event::poll(timeout).unwrap_or(false) {
-                    match event::read() {
-                        Ok(CrosstermEvent::Key(key)) => {
-                            // Only handle key press events, ignore release/repeat
-                            if key.kind == KeyEventKind::Press
-                                && sender_clone.send(Event::Key(key)).is_err()
-                            {
-                                return;
-                            }
+                    let event = match event::read() {
+                        // Only handle key press events, ignore release/repeat
+                        Ok(CrosstermEvent::Key(key)) if key.kind == KeyEventKind::Press => {
+                            Some(Event::Key(key))
                         }
-                        Ok(CrosstermEvent::Mouse(mouse)) => {
-                            if sender_clone.send(Event::Mouse(mouse)).is_err() {
-                                return;
-                            }
-                        }
+                        Ok(CrosstermEvent::Mouse(mouse)) => Some(Event::Mouse(mouse)),
                         Ok(CrosstermEvent::Resize(width, height)) => {
-                            if sender_clone.send(Event::Resize(width, height)).is_err() {
-                                return;
-                            }
+                            Some(Event::Resize(width, height))
                         }
-                        _ => {}
+                        _ => None,
+                    };
+
+                    // An error means the receiver is gone, so stop the loop.
+                    if let Some(event) = event {
+                        if sender_clone.send(event).is_err() {
+                            return;
+                        }
                     }
                 }
 

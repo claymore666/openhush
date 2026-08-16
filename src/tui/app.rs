@@ -236,10 +236,8 @@ impl App {
             KeyCode::Char('?') => {
                 self.show_help = !self.show_help;
             }
-            KeyCode::Esc => {
-                if self.show_help {
-                    self.show_help = false;
-                }
+            KeyCode::Esc if self.show_help => {
+                self.show_help = false;
             }
             _ => {}
         }

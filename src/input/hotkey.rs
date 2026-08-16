@@ -82,21 +82,24 @@ impl HotkeyListener {
 
             let callback = move |event: Event| {
                 match event.event_type {
-                    EventType::KeyPress(pressed_key) if pressed_key == key => {
-                        // Only emit if not already pressed (avoid key repeat)
-                        if !key_pressed_clone.swap(true, Ordering::SeqCst) {
-                            debug!("Hotkey pressed: {:?}", key);
-                            if let Err(e) = event_tx.blocking_send(HotkeyEvent::Pressed) {
-                                error!("Failed to send hotkey event: {}", e);
-                            }
+                    // The swap in each guard runs only once the key matches, so
+                    // each arm fires on the edge and ignores key repeat.
+                    EventType::KeyPress(pressed_key)
+                        if pressed_key == key
+                            && !key_pressed_clone.swap(true, Ordering::SeqCst) =>
+                    {
+                        debug!("Hotkey pressed: {:?}", key);
+                        if let Err(e) = event_tx.blocking_send(HotkeyEvent::Pressed) {
+                            error!("Failed to send hotkey event: {}", e);
                         }
                     }
-                    EventType::KeyRelease(released_key) if released_key == key => {
-                        if key_pressed_clone.swap(false, Ordering::SeqCst) {
-                            debug!("Hotkey released: {:?}", key);
-                            if let Err(e) = event_tx.blocking_send(HotkeyEvent::Released) {
-                                error!("Failed to send hotkey event: {}", e);
-                            }
+                    EventType::KeyRelease(released_key)
+                        if released_key == key
+                            && key_pressed_clone.swap(false, Ordering::SeqCst) =>
+                    {
+                        debug!("Hotkey released: {:?}", key);
+                        if let Err(e) = event_tx.blocking_send(HotkeyEvent::Released) {
+                            error!("Failed to send hotkey event: {}", e);
                         }
                     }
                     _ => {}
