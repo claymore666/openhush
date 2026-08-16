@@ -58,7 +58,7 @@ cp -r packaging/deb/debian .
 dpkg-buildpackage -us -uc -b
 
 # Install
-sudo dpkg -i ../openhush_0.5.0-1_amd64.deb
+sudo dpkg -i ../openhush_0.8.0-1_amd64.deb
 ```
 
 ---
@@ -92,10 +92,10 @@ brew install create-dmg
 
 # Build DMG
 cd packaging/macos
-./build-dmg.sh 0.5.0 ../../target/release/openhush
+./build-dmg.sh 0.8.0 ../../target/release/openhush
 
 # Optional: Sign and notarize
-./sign-and-notarize.sh OpenHush.app OpenHush-0.5.0-macos-universal.dmg
+./sign-and-notarize.sh OpenHush.app OpenHush-0.8.0-macos-universal.dmg
 ```
 
 **Code Signing:**
@@ -117,10 +117,10 @@ cd packaging/macos
 
 # Build MSI
 cd packaging\windows
-.\build-msi.ps1 -Version 0.5.0 -SourceDir ..\..\target\release
+.\build-msi.ps1 -Version 0.8.0 -SourceDir ..\..\target\release
 ```
 
-**Output:** `output/OpenHush-0.5.0-x64.msi`
+**Output:** `output/OpenHush-0.8.0-x64.msi`
 
 ---
 

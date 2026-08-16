@@ -2,7 +2,7 @@
 # Use this if distributing as a .app bundle
 
 cask "openhush" do
-  version "0.5.0"
+  version "0.8.0"
   sha256 "PLACEHOLDER_SHA256"  # Update with actual SHA256 on release
 
   url "https://github.com/claymore666/openhush/releases/download/v#{version}/OpenHush-#{version}-macos-universal.dmg"

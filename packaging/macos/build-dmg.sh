@@ -4,7 +4,7 @@
 
 set -e
 
-VERSION="${1:-0.5.0}"
+VERSION="${1:-0.8.0}"
 BINARY_PATH="${2:-../../target/release/openhush}"
 OUTPUT_DIR="${3:-.}"
 APP_NAME="OpenHush"

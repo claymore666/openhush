@@ -2,7 +2,7 @@
 # Requires: WiX Toolset v4+ (https://wixtoolset.org/)
 
 param(
-    [string]$Version = "0.5.0",
+    [string]$Version = "0.8.0",
     [string]$SourceDir = "..\..\target\release",
     [string]$OutputDir = ".\output"
 )
