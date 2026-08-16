@@ -107,9 +107,6 @@ dirs = "5"
 # Notifications (cross-platform: Linux, macOS, Windows)
 notify-rust = "4"
 
-# Image processing (for tray icon)
-image = "0.25"
-
 # GUI (preferences window)
 eframe = "0.33"
 egui = "0.33"
