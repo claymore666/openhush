@@ -37,7 +37,10 @@ cpal = "0.17"
 rubato = "0.16"
 
 # Wake word detection (openWakeWord ONNX models)
-ort = { version = "2.0.0-rc.10", features = ["load-dynamic"] }
+# Pinned exactly: ort is pre-release and breaks API between release
+# candidates. silero-vad-rust 6.2 asks for "2.0.0-rc.10", which resolves as
+# a caret range and picks up rc.13, against which it no longer compiles.
+ort = { version = "=2.0.0-rc.10", features = ["load-dynamic"] }
 
 # Tokenization for M2M-100 translation
 tokenizers = "0.22"
