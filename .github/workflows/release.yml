@@ -76,7 +76,14 @@ jobs:
             libxi-dev \
             libxtst-dev \
             libxcb1-dev \
-            libxkbcommon-dev
+            libxkbcommon-dev \
+            libxdo-dev \
+            libxrandr-dev \
+            libxcursor-dev \
+            libxinerama-dev \
+            libglib2.0-dev \
+            libgtk-3-dev \
+            libpulse-dev
 
       # macOS dependencies
       - name: Install macOS dependencies
