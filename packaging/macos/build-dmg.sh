@@ -58,8 +58,13 @@ cat > "${APP_DIR}/Contents/Info.plist" << EOF
     <string>????</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
+    <!-- The binary hard-links ScreenCaptureKit (LC_LOAD_DYLIB, not weak), so
+         dyld refuses to start it on any system without that framework. It
+         arrived in macOS 12.3; the system audio capture built on it is
+         documented as requiring 13+. Claiming 11.0 here meant the app could
+         be installed on systems where it cannot launch at all. -->
     <key>LSMinimumSystemVersion</key>
-    <string>11.0</string>
+    <string>13.0</string>
     <key>LSUIElement</key>
     <true/>
     <key>NSHighResolutionCapable</key>
