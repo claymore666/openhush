@@ -2471,9 +2471,8 @@ fn hide_console_window() {
 ///   (needed for system tray via StatusNotifierItem)
 #[cfg(unix)]
 fn daemonize_process(keep_session: bool) -> Result<(), DaemonError> {
-    use nix::unistd::{chdir, dup2, fork, setsid, ForkResult};
+    use nix::unistd::{chdir, dup2_stderr, dup2_stdout, fork, setsid, ForkResult};
     use std::fs::File;
-    use std::os::unix::io::AsRawFd;
 
     // Get log directory for stdout/stderr redirection
     let log_dir = Config::data_dir().map_err(|e| DaemonError::DaemonizeFailed(e.to_string()))?;
@@ -2553,9 +2552,9 @@ fn daemonize_process(keep_session: bool) -> Result<(), DaemonError> {
 
     // Redirect stdout/stderr to log files
     // Note: We don't redirect stdin as it's not needed for a daemon
-    dup2(stdout_file.as_raw_fd(), 1)
+    dup2_stdout(&stdout_file)
         .map_err(|e| DaemonError::DaemonizeFailed(format!("dup2 stdout failed: {}", e)))?;
-    dup2(stderr_file.as_raw_fd(), 2)
+    dup2_stderr(&stderr_file)
         .map_err(|e| DaemonError::DaemonizeFailed(format!("dup2 stderr failed: {}", e)))?;
 
     info!(

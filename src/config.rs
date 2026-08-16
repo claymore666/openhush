@@ -276,6 +276,34 @@ pub enum Theme {
     Auto,
 }
 
+/// Ask the system whether dark mode is enabled.
+///
+/// Falls back to light when the system expresses no preference or detection
+/// fails (no desktop portal, no D-Bus session, headless CI, ...).
+///
+/// On Linux, `dark_light::detect` queries the XDG desktop portal through
+/// `ashpd`, which drives the D-Bus future on an `async-std` executor. `ksni`
+/// (the tray) turns on `zbus`'s Tokio backend, and feature unification makes
+/// that backend apply to every `zbus` user in the binary — so the portal call
+/// needs a Tokio reactor in scope or it panics. Running it on a dedicated
+/// thread that holds a multi-threaded runtime guard supplies one, and keeps
+/// `is_dark` callable from anywhere, including from inside another runtime.
+fn detect_system_dark() -> bool {
+    std::thread::spawn(|| {
+        let Ok(runtime) = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+        else {
+            return false;
+        };
+        let _guard = runtime.enter();
+        matches!(dark_light::detect(), Ok(dark_light::Mode::Dark))
+    })
+    .join()
+    .unwrap_or(false)
+}
+
 impl Theme {
     /// Detect the effective theme based on system preference.
     /// Returns true if dark mode should be used.
@@ -284,13 +312,7 @@ impl Theme {
         match self {
             Theme::Light => false,
             Theme::Dark => true,
-            Theme::Auto => {
-                // Use dark-light crate to detect system theme
-                match dark_light::detect() {
-                    dark_light::Mode::Dark => true,
-                    dark_light::Mode::Light | dark_light::Mode::Default => false,
-                }
-            }
+            Theme::Auto => detect_system_dark(),
         }
     }
 
