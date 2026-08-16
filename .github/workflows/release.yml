@@ -420,7 +420,9 @@ jobs:
             release/*.msi
             release/*-checksums.txt
           generate_release_notes: true
-          draft: false
+          # Created unpublished so the artifacts can be checked before they
+          # reach anyone. Publish from the Releases page once they look right.
+          draft: true
           prerelease: ${{ contains(github.ref_name, '-') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
