@@ -8,7 +8,7 @@
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <Package Name="OpenHush"
            Manufacturer="OpenHush Team"
-           Version="0.8.0"
+           Version="$(var.Version)"
            UpgradeCode="E8F3A2B1-5C4D-4E6F-8A9B-0C1D2E3F4A5B"
            Scope="perUser">
 
