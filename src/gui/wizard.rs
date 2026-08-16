@@ -672,7 +672,7 @@ impl OnboardingWizard {
                             rect.right_center() + egui::vec2(2.0, 0.0),
                             rect.right_center() + egui::vec2(20.0, 0.0),
                         ],
-                        egui::Stroke::new(2.0, line_color),
+                        egui::Stroke::new(2.0_f32, line_color),
                     );
                     ui.add_space(22.0);
                 }

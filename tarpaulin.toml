@@ -2,7 +2,7 @@
 # https://github.com/xd009642/tarpaulin
 
 [report]
-out = ["xml", "html"]
+out = ["Xml", "Html"]
 
 [run]
 ignore-tests = true

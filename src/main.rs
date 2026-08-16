@@ -17,7 +17,6 @@ mod engine;
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 mod gui;
 mod input;
-#[cfg(any(target_os = "macos", target_os = "windows"))]
 mod ipc;
 mod output;
 mod panic_handler;
@@ -31,6 +30,7 @@ mod summarization;
 mod translation;
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 mod tray;
+mod tui;
 mod vad;
 mod vocabulary;
 
@@ -61,6 +61,9 @@ enum Commands {
 
     /// Open preferences GUI
     Preferences,
+
+    /// Launch terminal user interface (TUI)
+    Tui,
 
     /// Run the first-run setup wizard
     #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
@@ -347,7 +350,18 @@ struct LogGuard {
     _guard: Option<tracing_appender::non_blocking::WorkerGuard>,
 }
 
-fn init_logging(verbose: bool, foreground: bool, config_level: Option<&str>) -> LogGuard {
+/// Logging mode for different command contexts.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LogMode {
+    /// Log to stdout (foreground commands)
+    Stdout,
+    /// Log to file only (daemon mode)
+    File,
+    /// Log to file, no stdout (TUI mode - stdout is used for UI)
+    Tui,
+}
+
+fn init_logging(verbose: bool, mode: LogMode, config_level: Option<&str>) -> LogGuard {
     // Priority: RUST_LOG env > --verbose flag > config file > default
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         let level = if verbose {
@@ -364,7 +378,7 @@ fn init_logging(verbose: bool, foreground: bool, config_level: Option<&str>) -> 
         EnvFilter::new(format!("openhush={},whisper_rs={}", level, whisper_level))
     });
 
-    if foreground {
+    if mode == LogMode::Stdout {
         // Foreground mode: log to stdout with pretty formatting
         tracing_subscriber::registry()
             .with(filter)
@@ -437,17 +451,24 @@ fn main() -> anyhow::Result<()> {
 }
 
 async fn async_main(cli: Cli) -> anyhow::Result<()> {
-    // Determine if we're running in foreground mode for logging
-    let foreground_mode = match &cli.command {
-        Commands::Start { foreground, .. } => *foreground,
-        _ => true, // All other commands run in foreground
+    // Determine logging mode based on command
+    let log_mode = match &cli.command {
+        Commands::Start { foreground, .. } => {
+            if *foreground {
+                LogMode::Stdout
+            } else {
+                LogMode::File
+            }
+        }
+        Commands::Tui => LogMode::Tui, // TUI needs stdout for UI, log to file
+        _ => LogMode::Stdout,          // All other commands run in foreground
     };
 
     // Load config early to get log level (use default if config fails)
     let config_log_level = config::Config::load().ok().map(|c| c.logging.level);
 
     // Initialize logging (keep guard alive for the duration of the program)
-    let _log_guard = init_logging(cli.verbose, foreground_mode, config_log_level.as_deref());
+    let _log_guard = init_logging(cli.verbose, log_mode, config_log_level.as_deref());
 
     match cli.command {
         Commands::Start {
@@ -469,6 +490,11 @@ async fn async_main(cli: Cli) -> anyhow::Result<()> {
         Commands::Preferences => {
             info!("Opening preferences...");
             gui::run_preferences()?;
+        }
+
+        Commands::Tui => {
+            info!("Launching TUI...");
+            tui::run()?;
         }
 
         #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
@@ -1178,15 +1204,18 @@ async fn async_main(cli: Cli) -> anyhow::Result<()> {
                     RecordingAction::Status => match client.send(IpcCommand::Status) {
                         Ok(response) => {
                             if response.ok {
-                                let recording = response.recording.unwrap_or(false);
-                                let model = response.model_loaded.unwrap_or(false);
-                                let version = response.version.unwrap_or_default();
-                                println!(
-                                    "Status: {}",
-                                    if recording { "recording" } else { "idle" }
-                                );
-                                println!("Model loaded: {}", model);
-                                println!("Version: {}", version);
+                                if let Some(ipc::IpcResponseData::Status(status)) = response.data {
+                                    println!(
+                                        "Status: {}",
+                                        if status.state == ipc::DaemonState::Recording {
+                                            "recording"
+                                        } else {
+                                            "idle"
+                                        }
+                                    );
+                                    println!("Model loaded: {}", status.model_loaded);
+                                    println!("Version: {}", status.version);
+                                }
                             } else if let Some(err) = response.error {
                                 eprintln!("Failed to get status: {}", err);
                                 std::process::exit(1);

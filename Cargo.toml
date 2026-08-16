@@ -1,6 +1,6 @@
 [package]
 name = "openhush"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2021"
 authors = ["Christian Kamien <christian.kamien@gmail.com>"]
 description = "Open-source voice-to-text that acts as a seamless whisper keyboard"
@@ -37,7 +37,10 @@ cpal = "0.17"
 rubato = "0.16"
 
 # Wake word detection (openWakeWord ONNX models)
-ort = { version = "2.0.0-rc.10", features = ["load-dynamic"] }
+# Pinned exactly: ort is pre-release and breaks API between release
+# candidates. silero-vad-rust 6.2 asks for "2.0.0-rc.10", which resolves as
+# a caret range and picks up rc.13, against which it no longer compiles.
+ort = { version = "=2.0.0-rc.10", features = ["load-dynamic"] }
 
 # Tokenization for M2M-100 translation
 tokenizers = "0.22"
@@ -95,7 +98,7 @@ anyhow = "1"
 chrono = "0.4"
 
 # System theme detection (dark mode)
-dark-light = "1.1"
+dark-light = "2.0"
 
 # Platform paths (XDG on Linux, native elsewhere)
 directories = "5"
@@ -104,12 +107,13 @@ dirs = "5"
 # Notifications (cross-platform: Linux, macOS, Windows)
 notify-rust = "4"
 
-# Image processing (for tray icon)
-image = "0.25"
-
 # GUI (preferences window)
-eframe = "0.29"
-egui = "0.29"
+eframe = "0.33"
+egui = "0.33"
+
+# TUI (terminal user interface)
+ratatui = "0.29"
+crossterm = "0.28"
 
 # Open files/URLs
 open = "5"
@@ -129,7 +133,7 @@ async-trait = "0.1.89"
 
 # Unix process management
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.29", features = ["signal", "process", "fs"] }
+nix = { version = "0.30", features = ["signal", "process", "fs"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # System tray via D-Bus StatusNotifierItem (no GTK required)
@@ -141,7 +145,7 @@ libpulse-binding = "2.28"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 # Cross-platform system tray
-tray-icon = "0.19"
+tray-icon = "0.21"
 # Windows message loop
 winit = { version = "0.30", default-features = false, features = ["rwh_06"] }
 # Windows API for console hiding
@@ -153,7 +157,7 @@ wasapi = "0.22"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Cross-platform system tray
-tray-icon = "0.19"
+tray-icon = "0.21"
 # macOS accessibility permission checking
 macos-accessibility-client = "0.0.1"
 # macOS system audio capture (ScreenCaptureKit, macOS 13+)
@@ -168,6 +172,12 @@ predicates = "3"
 lto = true
 codegen-units = 1
 strip = true
+
+# Fast release builds for testing (optimized but quick to compile)
+[profile.release-fast]
+inherits = "release"
+lto = false
+codegen-units = 16
 
 # Package metadata for cargo-deb
 [package.metadata.deb]

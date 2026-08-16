@@ -103,3 +103,7 @@ openhush transcribe FILE      # One-shot transcription
 
 - **No sudo access**: Claude Code cannot run `sudo` commands. When system packages are needed (e.g., `apt install`, `dnf install`), tell the user which commands to run.
 - **Rust not installed**: If `cargo` is not found, tell the user to install Rust via `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
+
+## User Preferences
+
+- **Hotkey**: Linux uses `altgr`, macOS uses `ctrlright` (Ctrl Right)

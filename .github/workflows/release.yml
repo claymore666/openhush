@@ -135,7 +135,7 @@ jobs:
           Compress-Archive -Path dist/* -DestinationPath "openhush-${{ github.ref_name }}-${{ matrix.name }}.zip"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: openhush-${{ matrix.name }}
           path: openhush-${{ github.ref_name }}-${{ matrix.name }}.*
@@ -153,7 +153,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download Linux artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: openhush-linux-x86_64
           path: artifact
@@ -219,7 +219,7 @@ jobs:
           mv "${PKG_DIR}.deb" "openhush-${{ github.ref_name }}-amd64.deb"
 
       - name: Upload .deb artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: openhush-deb
           path: openhush-*.deb
@@ -237,7 +237,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download macOS artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: openhush-macos-*
           path: artifacts
@@ -307,7 +307,7 @@ jobs:
               "openhush-${{ github.ref_name }}-macos-universal.dmg"
 
       - name: Upload .dmg artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: openhush-dmg
           path: openhush-*.dmg
@@ -325,7 +325,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download Windows artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: openhush-windows-x86_64
           path: artifact
@@ -361,7 +361,7 @@ jobs:
               -o "..\..\openhush-${{ github.ref_name }}-x64.msi"
 
       - name: Upload .msi artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: openhush-msi
           path: openhush-*.msi
@@ -381,7 +381,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
           merge-multiple: false

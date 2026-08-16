@@ -21,8 +21,7 @@ use crate::engine::{WhisperEngine, WhisperError};
 use crate::gui;
 use crate::input::wake_word::{WakeWordDetector, WakeWordError};
 use crate::input::{AudioMark, AudioRecorder, AudioRecorderError, HotkeyEvent, HotkeyListener};
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-use crate::ipc::{IpcCommand, IpcResponse, IpcServer};
+use crate::ipc::{IpcCommand, IpcEvent, IpcResponse, IpcServer, IpcServerHandle};
 use crate::output::{ActionContext, ActionRunner, OutputError, OutputHandler};
 use crate::platform::{AudioFeedback, CurrentPlatform, Notifier, Platform};
 use crate::queue::{
@@ -38,6 +37,7 @@ use crate::tray::{TrayEvent, TrayManager};
 use crate::vad::VadConfig;
 use crate::vad::{silero::SileroVad, VadEngine, VadError, VadState};
 use crate::vocabulary::{VocabularyError, VocabularyManager};
+use futures_util::FutureExt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use thiserror::Error;
@@ -49,6 +49,9 @@ const CHANNEL_BUFFER_SIZE: usize = 32;
 
 /// VAD processing interval (32ms = 512 samples at 16kHz, matches Silero VAD chunk size)
 const VAD_PROCESS_INTERVAL_MS: u64 = 32;
+
+/// Audio level update interval for UI visualization (50ms = 20 Hz)
+const AUDIO_LEVEL_INTERVAL_MS: u64 = 50;
 
 // ============================================================================
 // Initialization Functions
@@ -325,8 +328,7 @@ fn spawn_m2m100_download(model: M2M100Model) {
         let mut last_percent = 0u64;
         let result = download_m2m100_model(model, |filename, downloaded, total| {
             // Log progress every 10%
-            if total > 0 {
-                let percent = (downloaded * 100) / total;
+            if let Some(percent) = (downloaded * 100).checked_div(total) {
                 if percent >= last_percent + 10 {
                     last_percent = percent;
                     info!("M2M-100 download: {} - {}%", filename, percent);
@@ -885,18 +887,24 @@ impl Daemon {
             }
         };
 
-        // Initialize IPC server (macOS and Windows)
-        #[cfg(any(target_os = "macos", target_os = "windows"))]
-        let ipc_server: Option<IpcServer> = match IpcServer::new() {
-            Ok(server) => Some(server),
-            Err(e) => {
-                warn!(
-                    "IPC server unavailable: {}. Continuing without IPC control.",
-                    e
-                );
-                None
-            }
-        };
+        // Initialize IPC server (Unix only for now)
+        #[cfg(unix)]
+        let (ipc_server, ipc_handle): (Option<IpcServer>, Option<IpcServerHandle>) =
+            match IpcServer::new() {
+                Ok(server) => {
+                    let handle = server.handle();
+                    (Some(server), Some(handle))
+                }
+                Err(e) => {
+                    warn!(
+                        "IPC server unavailable: {}. Continuing without IPC control.",
+                        e
+                    );
+                    (None, None)
+                }
+            };
+        #[cfg(not(unix))]
+        let (ipc_server, ipc_handle): (Option<IpcServer>, Option<IpcServerHandle>) = (None, None);
 
         // Initialize REST API server if enabled
         let api_status = Arc::new(RwLock::new(api::DaemonStatus {
@@ -1144,8 +1152,7 @@ impl Daemon {
         let worker_handle = spawn_worker(initial_engine, command_rx, result_tx, audio_config)?;
         info!("Transcription worker started");
 
-        // Track model loaded state (for macOS/Windows IPC; Linux uses dbus_status)
-        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        // Track model loaded state (for IPC clients)
         let mut model_loaded = preload;
 
         // Result tracker for ordered output
@@ -1203,6 +1210,16 @@ impl Daemon {
         let mut wake_word_timer: Option<tokio::time::Interval> = if wake_word_detector.is_some() {
             let mut timer =
                 tokio::time::interval(tokio::time::Duration::from_millis(VAD_PROCESS_INTERVAL_MS));
+            timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            Some(timer)
+        } else {
+            None
+        };
+
+        // Audio level timer for UI visualization (always on when IPC server is available)
+        let mut audio_level_timer: Option<tokio::time::Interval> = if ipc_handle.is_some() {
+            let mut timer =
+                tokio::time::interval(tokio::time::Duration::from_millis(AUDIO_LEVEL_INTERVAL_MS));
             timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             Some(timer)
         } else {
@@ -1408,14 +1425,40 @@ impl Daemon {
                 }
             }
 
-            // Check for IPC commands (macOS and Windows)
-            #[cfg(any(target_os = "macos", target_os = "windows"))]
+            // Check for IPC commands (all platforms)
             if let Some(ref server) = ipc_server {
-                if let Some((cmd, responder)) = server.try_recv() {
+                // Process any queued broadcasts (audio levels, etc.)
+                server.process_broadcasts();
+
+                // Poll for incoming commands
+                for (client_id, cmd, responder) in server.poll() {
                     match cmd {
                         IpcCommand::Status => {
                             let is_recording = !matches!(self.state, DaemonState::Idle);
-                            responder(IpcResponse::status(is_recording, model_loaded));
+                            responder(IpcResponse::status_simple(is_recording, model_loaded));
+                        }
+                        IpcCommand::Subscribe { events: _ } => {
+                            server.subscribe_client(client_id);
+                            responder(IpcResponse::subscribed(client_id));
+                        }
+                        IpcCommand::Unsubscribe => {
+                            responder(IpcResponse::ok());
+                        }
+                        IpcCommand::Ping => {
+                            responder(IpcResponse::pong());
+                        }
+                        IpcCommand::HistoryList {
+                            limit: _,
+                            offset: _,
+                        } => {
+                            // TODO: Implement history storage
+                            responder(IpcResponse::error("History not yet implemented"));
+                        }
+                        IpcCommand::ConfigGet { key: _ } => {
+                            responder(IpcResponse::error("Config get not yet implemented"));
+                        }
+                        IpcCommand::ConfigSet { key: _, value: _ } => {
+                            responder(IpcResponse::error("Config set not yet implemented"));
                         }
                         IpcCommand::Stop => {
                             info!("Stop command received via IPC");
@@ -1532,6 +1575,23 @@ impl Daemon {
                                 responder(IpcResponse::ok());
                             }
                         }
+                    }
+                }
+            }
+
+            // Broadcast audio levels to IPC clients (20 Hz)
+            if let Some(ref mut timer) = audio_level_timer {
+                if timer.tick().now_or_never().is_some() {
+                    if let Some(ref handle) = ipc_handle {
+                        // Calculate current audio levels from ring buffer
+                        let (rms_db, peak_db) = audio_recorder.current_levels(50); // 50ms window
+                        let vad_active = !matches!(self.state, DaemonState::Idle);
+
+                        handle.broadcast(IpcEvent::AudioLevel {
+                            rms_db,
+                            peak_db,
+                            vad_active,
+                        });
                     }
                 }
             }
@@ -2410,9 +2470,8 @@ fn hide_console_window() {
 ///   (needed for system tray via StatusNotifierItem)
 #[cfg(unix)]
 fn daemonize_process(keep_session: bool) -> Result<(), DaemonError> {
-    use nix::unistd::{chdir, dup2, fork, setsid, ForkResult};
+    use nix::unistd::{chdir, dup2_stderr, dup2_stdout, fork, setsid, ForkResult};
     use std::fs::File;
-    use std::os::unix::io::AsRawFd;
 
     // Get log directory for stdout/stderr redirection
     let log_dir = Config::data_dir().map_err(|e| DaemonError::DaemonizeFailed(e.to_string()))?;
@@ -2492,9 +2551,9 @@ fn daemonize_process(keep_session: bool) -> Result<(), DaemonError> {
 
     // Redirect stdout/stderr to log files
     // Note: We don't redirect stdin as it's not needed for a daemon
-    dup2(stdout_file.as_raw_fd(), 1)
+    dup2_stdout(&stdout_file)
         .map_err(|e| DaemonError::DaemonizeFailed(format!("dup2 stdout failed: {}", e)))?;
-    dup2(stderr_file.as_raw_fd(), 2)
+    dup2_stderr(&stderr_file)
         .map_err(|e| DaemonError::DaemonizeFailed(format!("dup2 stderr failed: {}", e)))?;
 
     info!(
@@ -2675,20 +2734,27 @@ pub async fn status() -> Result<(), DaemonError> {
             Ok(mut client) => match client.send(IpcCommand::Status) {
                 Ok(response) => {
                     if response.ok {
-                        println!("OpenHush daemon is running");
-                        if let Some(version) = response.version {
-                            println!("  Version: {}", version);
-                        }
-                        if let Some(recording) = response.recording {
-                            println!("  Recording: {}", if recording { "yes" } else { "no" });
-                        }
-                        if let Some(model_loaded) = response.model_loaded {
+                        if let Some(crate::ipc::IpcResponseData::Status(status)) = response.data {
+                            println!("OpenHush daemon is running");
+                            println!("  Version: {}", status.version);
+                            println!(
+                                "  Recording: {}",
+                                if status.state == crate::ipc::DaemonState::Recording {
+                                    "yes"
+                                } else {
+                                    "no"
+                                }
+                            );
                             println!(
                                 "  Model: {}",
-                                if model_loaded { "loaded" } else { "not loaded" }
+                                if status.model_loaded {
+                                    "loaded"
+                                } else {
+                                    "not loaded"
+                                }
                             );
+                            return Ok(());
                         }
-                        return Ok(());
                     }
                 }
                 Err(e) => {

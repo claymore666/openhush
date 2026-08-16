@@ -2,6 +2,50 @@
 
 All notable changes to OpenHush are documented here.
 
+## [0.8.0] - 2026-08-16
+
+### Terminal User Interface
+
+A lazygit-style TUI for driving and monitoring the daemon from the terminal.
+
+- **Dashboard layout** — status, live transcription, and history panels
+- **Real-time audio level meter** fed by the daemon at 20Hz
+- **Keyboard navigation** — Tab and arrow keys, single-key shortcuts, `?` for help
+- **Color themes** — terminal-default, dark, and light, with a centralized palette
+- **Panic handler** that restores terminal state instead of leaving a broken shell
+- Logs are redirected to `~/.local/share/openhush/openhush.log` in TUI mode, so they no longer corrupt the alternate screen buffer
+
+Implements #171, partially implements #169.
+
+### Unified IPC with Event Subscriptions
+
+- New IPC layer (`IpcCommand`, `IpcResponse`, `IpcEvent`, `DaemonStatus`) shared by all clients
+- Daemon-side `IpcServer` broadcasts events to subscribed clients
+- **Audio level streaming** for UI visualization via `AudioRingBuffer::current_levels()` (closes #198)
+- IPC is now enabled on all platforms rather than macOS/Windows only
+- Recording control and live status updates flow over IPC
+
+### Fixed
+
+- **Wrong microphone picked on PulseAudio/PipeWire** — monitor (loopback) sources are exposed as regular inputs, so with no active mic `default_input_device()` could fall back to one and record desktop audio instead of your voice. Monitor sources are now filtered out of default selection, reinit, and `list_devices`.
+- **Translation was inverted** — `whisper-rs` treats `set_translate(false)` as "enable translation". `translate = true` in config now actually translates to English.
+- **Maximum audio duration raised from 5 minutes to 2 hours**, so meetings and lectures no longer hit the duration guard.
+- **TUI responsiveness** — IPC timeouts cut from 30s to 250–500ms, daemon connection deferred out of startup, and key release events are ignored so terminals that emit both no longer double-handle input.
+- **Non-Unix builds** — added stubs for `IpcServer::new/poll/broadcast_event`, which were Unix-only but called unconditionally; updated the macOS/Windows status path for the `IpcResponseData::Status` envelope.
+
+### Dependencies
+
+- `eframe`/`egui` 0.29 → 0.33, `tray-icon` 0.19 → 0.21
+- `nix` 0.29 → 0.30 — switched to the new `dup2_stdout`/`dup2_stderr` helpers
+- `dark-light` 1.1 → 2.0 — fixes a runtime panic in `Theme::Auto` on Linux, where the XDG portal query ran without a Tokio reactor because `ksni` enables `zbus`'s Tokio backend for the whole binary
+- CI: `upload-artifact` v7, `download-artifact` v8, `codecov-action` v5
+
+### Build
+
+- New `release-fast` profile (no LTO, 16 codegen units) for quicker test builds
+
+---
+
 ## [0.7.0] - 2026-01-03
 
 ### Platform Parity - System Audio Capture (All Platforms)

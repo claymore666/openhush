@@ -1,8 +1,9 @@
 //! Windows named pipe IPC implementation.
 
-use super::{IpcCommand, IpcError, IpcResponse};
+use super::{IpcCommand, IpcError, IpcEvent, IpcResponse};
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
+use std::sync::mpsc::{self, Receiver, Sender};
 use tracing::{debug, info, warn};
 
 // Windows API types
@@ -74,120 +75,20 @@ extern "system" {
     fn GetLastError() -> u32;
 }
 
-/// IPC server using Windows named pipe.
-pub struct IpcServer {
+/// Transport layer for IPC server.
+pub struct IpcServerTransport;
+
+/// Transport layer for IPC client.
+pub struct IpcClientTransport;
+
+/// Internal IPC client implementation for Windows.
+pub struct IpcClientInner {
     pipe: HANDLE,
+    event_rx: Option<Receiver<IpcEvent>>,
 }
 
-impl IpcServer {
-    /// Create named pipe server.
-    pub fn new() -> Result<Self, IpcError> {
-        let pipe_name: Vec<u16> = OsStr::new(PIPE_NAME)
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect();
-
-        let pipe = unsafe {
-            CreateNamedPipeW(
-                pipe_name.as_ptr(),
-                PIPE_ACCESS_DUPLEX,
-                PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
-                PIPE_UNLIMITED_INSTANCES,
-                BUFFER_SIZE,
-                BUFFER_SIZE,
-                0,
-                std::ptr::null_mut(),
-            )
-        };
-
-        if pipe == INVALID_HANDLE_VALUE {
-            return Err(IpcError::BindFailed("Failed to create named pipe".into()));
-        }
-
-        info!("IPC listening on {}", PIPE_NAME);
-        Ok(Self { pipe })
-    }
-
-    /// Try to receive a command (blocking for short duration).
-    pub fn try_recv(&self) -> Option<(IpcCommand, Box<dyn FnOnce(IpcResponse) + Send>)> {
-        // Try to connect a client (this blocks briefly)
-        let connected = unsafe { ConnectNamedPipe(self.pipe, std::ptr::null_mut()) };
-
-        if connected == 0 {
-            // Check if client already connected
-            let error = unsafe { GetLastError() };
-            if error != ERROR_PIPE_CONNECTED {
-                return None;
-            }
-        }
-
-        // Read command
-        let mut buffer = [0u8; BUFFER_SIZE as usize];
-        let mut bytes_read: u32 = 0;
-
-        let read_ok = unsafe {
-            ReadFile(
-                self.pipe,
-                buffer.as_mut_ptr(),
-                BUFFER_SIZE,
-                &mut bytes_read,
-                std::ptr::null_mut(),
-            )
-        };
-
-        if read_ok == 0 || bytes_read == 0 {
-            unsafe { DisconnectNamedPipe(self.pipe) };
-            return None;
-        }
-
-        let data = String::from_utf8_lossy(&buffer[..bytes_read as usize]);
-        let line = data.lines().next()?;
-
-        match serde_json::from_str::<IpcCommand>(line) {
-            Ok(cmd) => {
-                debug!("IPC command: {:?}", cmd);
-                let pipe = self.pipe;
-                let responder = Box::new(move |response: IpcResponse| {
-                    if let Ok(json) = serde_json::to_string(&response) {
-                        let msg = format!("{}\n", json);
-                        let bytes = msg.as_bytes();
-                        let mut written: u32 = 0;
-                        unsafe {
-                            WriteFile(
-                                pipe,
-                                bytes.as_ptr(),
-                                bytes.len() as u32,
-                                &mut written,
-                                std::ptr::null_mut(),
-                            );
-                            DisconnectNamedPipe(pipe);
-                        }
-                    }
-                });
-                Some((cmd, responder))
-            }
-            Err(e) => {
-                warn!("IPC parse error: {}", e);
-                unsafe { DisconnectNamedPipe(self.pipe) };
-                None
-            }
-        }
-    }
-}
-
-impl Drop for IpcServer {
-    fn drop(&mut self) {
-        unsafe { CloseHandle(self.pipe) };
-    }
-}
-
-/// IPC client for Windows.
-pub struct IpcClient {
-    pipe: HANDLE,
-}
-
-impl IpcClient {
-    /// Connect to daemon's named pipe.
+impl IpcClientInner {
+    /// Connect to daemon.
     pub fn connect() -> Result<Self, IpcError> {
         let pipe_name: Vec<u16> = OsStr::new(PIPE_NAME)
             .encode_wide()
@@ -210,7 +111,10 @@ impl IpcClient {
             return Err(IpcError::NotRunning);
         }
 
-        Ok(Self { pipe })
+        Ok(Self {
+            pipe,
+            event_rx: None,
+        })
     }
 
     /// Send command and get response.
@@ -260,9 +164,25 @@ impl IpcClient {
 
         serde_json::from_str(line).map_err(|e| IpcError::RecvFailed(e.to_string()))
     }
+
+    /// Subscribe to events (Windows: not yet implemented, returns empty receiver).
+    pub fn subscribe(&mut self) -> Result<Receiver<IpcEvent>, IpcError> {
+        // TODO: Implement persistent connection with event streaming for Windows
+        let (_tx, rx) = mpsc::channel();
+        self.event_rx = Some(rx);
+        warn!("IPC event subscription not yet implemented on Windows");
+
+        let (tx2, rx2) = mpsc::channel();
+        Ok(rx2)
+    }
+
+    /// Try to receive an event (non-blocking).
+    pub fn try_recv_event(&mut self) -> Option<IpcEvent> {
+        self.event_rx.as_ref()?.try_recv().ok()
+    }
 }
 
-impl Drop for IpcClient {
+impl Drop for IpcClientInner {
     fn drop(&mut self) {
         unsafe { CloseHandle(self.pipe) };
     }
