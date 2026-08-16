@@ -5,7 +5,7 @@
 
 use thiserror::Error;
 
-/// Maximum audio duration in seconds (5 minutes)
+/// Maximum audio duration in seconds (2 hours)
 pub const MAX_AUDIO_DURATION_SECS: f32 = 7200.0;
 
 /// Minimum audio duration in seconds (100ms)
@@ -163,8 +163,11 @@ mod tests {
 
     #[test]
     fn test_too_long() {
-        // 301 seconds (above 300s maximum)
-        let samples = vec![0.0f32; 16000 * 301];
+        // One second past the maximum duration.
+        // The buffer is rejected before the per-sample scan, so this
+        // zeroed allocation is never faulted in.
+        let secs = MAX_AUDIO_DURATION_SECS as usize + 1;
+        let samples = vec![0.0f32; 16000 * secs];
         let result = validate_audio(&samples, 16000);
         assert!(matches!(result, Err(AudioValidationError::TooLong(_, _))));
     }
