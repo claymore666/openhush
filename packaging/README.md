@@ -13,6 +13,28 @@ This directory contains packaging files for all supported platforms.
 | MSI | Windows | `windows/` | Ready |
 | DMG | macOS | `macos/` | Ready |
 
+## What the release actually builds
+
+`release.yml` runs only on a tag push, so anything defined inline in it can
+drift for a whole release cycle without anyone noticing. It used to hand-roll
+its own `.deb` control file and its own `Info.plist`, and both drifted: PR #240
+corrected `LSMinimumSystemVersion` in `macos/build-dmg.sh` while the workflow
+kept shipping the stale value from its own copy.
+
+Each released artifact now has exactly one definition, and it lives here:
+
+| Artifact | Built by | Notes |
+|----------|----------|-------|
+| `openhush-v<ver>-amd64.deb` | `deb/build-deb.sh` | Repacks the CI binary. `Depends` derived from the ELF via `dpkg-shlibdeps`. |
+| `openhush-v<ver>-macos-universal.dmg` | `macos/build-dmg.sh` | Name is fixed by `homebrew/openhush.cask.rb`. |
+| `openhush-v<ver>-x64.msi` | `windows/openhush.wxs` | Version passed in with `-d Version=`. |
+
+Run any of them by hand and you get the same artifact CI does. If you change
+how a package is built, change it there — not in the workflow.
+
+`deb/debian/` is a separate, from-source path for distribution packagers using
+`dpkg-buildpackage`. It is not what the release ships.
+
 ---
 
 ## Linux
@@ -49,15 +71,34 @@ makepkg -si
 
 **Location:** `deb/`
 
+Two paths, for two different audiences.
+
+**`build-deb.sh` — what the release ships.** Repacks an already-built binary:
+
 ```bash
-# Install build dependencies
+sudo apt install fakeroot dpkg-dev
+cargo build --release
+
+# <version> <binary> [outdir]
+packaging/deb/build-deb.sh 0.8.0 target/release/openhush .
+packaging/verify-deb.sh openhush-v0.8.0-amd64.deb
+```
+
+`Depends` is computed with `dpkg-shlibdeps` rather than written by hand, so it
+cannot fall behind what the binary links against. That means the libraries it
+links must be installed when you build, and that the resulting versions match
+the distro you build on — CI uses `ubuntu-22.04`, the oldest supported target,
+because a dependency computed on a newer distro is unsatisfiable on an older
+one.
+
+**`debian/` — from source, for distribution packagers:**
+
+```bash
 sudo apt install debhelper cargo rustc libasound2-dev libdbus-1-dev libgtk-3-dev
 
-# Build package (from project root)
+# From the project root
 cp -r packaging/deb/debian .
 dpkg-buildpackage -us -uc -b
-
-# Install
 sudo dpkg -i ../openhush_0.8.0-1_amd64.deb
 ```
 
@@ -86,17 +127,24 @@ brew install --formula packaging/homebrew/openhush.rb
 
 **Location:** `macos/`
 
-```bash
-# Requires: create-dmg
-brew install create-dmg
+This is the script the release runs; nothing beyond a stock macOS is needed.
 
-# Build DMG
-cd packaging/macos
-./build-dmg.sh 0.8.0 ../../target/release/openhush
+```bash
+cargo build --release --features metal
+
+# <version> <binary> [outdir]  ->  openhush-v0.8.0-macos-universal.dmg
+packaging/macos/build-dmg.sh 0.8.0 target/release/openhush .
 
 # Optional: Sign and notarize
-./sign-and-notarize.sh OpenHush.app OpenHush-0.8.0-macos-universal.dmg
+packaging/macos/sign-and-notarize.sh OpenHush.app openhush-v0.8.0-macos-universal.dmg
 ```
+
+The output name is what `homebrew/openhush.cask.rb` downloads. Changing it
+breaks the cask, so change both together.
+
+`LSMinimumSystemVersion` is 13.0 because the binary hard-links
+ScreenCaptureKit; on an older system dyld refuses to start it at all. Raise it
+only alongside an actual change in what the binary links.
 
 **Code Signing:**
 - Requires Apple Developer account ($99/year)
@@ -191,8 +239,10 @@ Before releasing a new version:
    - `packaging/homebrew/openhush.rb`
    - `packaging/homebrew/openhush.cask.rb`
    - `packaging/windows/openhush.wxs`
-   - `packaging/windows/build-msi.ps1`
-   - `packaging/macos/build-dmg.sh`
+   - `packaging/windows/build-msi.ps1` (default `-Version` only)
+
+   `packaging/deb/build-deb.sh` and `packaging/macos/build-dmg.sh` take the
+   version as an argument and need no bump.
 
 2. **Update Checksums:**
 

@@ -174,7 +174,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y debhelper fakeroot dpkg-dev
+          sudo apt-get install -y fakeroot dpkg-dev
           # dpkg-shlibdeps resolves each NEEDED library to the package that
           # ships it, which requires those packages to be installed here.
           # Without them it cannot see the dependency at all.
@@ -186,86 +186,13 @@ jobs:
             libxtst6 \
             libssl3
 
+      # The package definition lives in packaging/, not here. Keeping it inline
+      # meant it could only ever be exercised by pushing a tag; that is how
+      # v0.8.0 shipped a .deb whose Depends had drifted from what the binary
+      # links against. Run the same script locally to reproduce this artifact.
       - name: Build .deb package
         run: |
-          VERSION="${{ github.ref_name }}"
-          VERSION="${VERSION#v}"  # Remove 'v' prefix
-
-          # Create package structure
-          PKG_DIR="openhush_${VERSION}_amd64"
-          mkdir -p "${PKG_DIR}/DEBIAN"
-          mkdir -p "${PKG_DIR}/usr/bin"
-          mkdir -p "${PKG_DIR}/usr/share/applications"
-          mkdir -p "${PKG_DIR}/usr/share/doc/openhush"
-
-          # Copy binary
-          cp artifact/openhush "${PKG_DIR}/usr/bin/"
-          chmod 755 "${PKG_DIR}/usr/bin/openhush"
-
-          # Derive the runtime dependencies from the binary itself.
-          #
-          # This list used to be written by hand and drifted out of sync with
-          # what the binary actually links against: v0.8.0 shipped a package
-          # that installed cleanly and then could not start, because libpulse,
-          # libX11 and libXtst were missing from it. dpkg-shlibdeps reads the
-          # ELF NEEDED entries and maps each one to the package that provides
-          # it, so the list cannot drift again.
-          #
-          # Deliberately no --ignore-missing-info: that flag drops libraries
-          # it cannot resolve instead of failing, which is exactly how an
-          # incomplete list would slip through unnoticed.
-          mkdir -p shlibdeps/debian
-          cat > shlibdeps/debian/control << 'CTRL'
-          Source: openhush
-
-          Package: openhush
-          Architecture: amd64
-          Depends: ${shlibs:Depends}
-          Description: placeholder used only to compute dependencies
-           dpkg-shlibdeps requires a debian/control to run against.
-          CTRL
-
-          SHLIB_DEPS="$(cd shlibdeps && dpkg-shlibdeps -O \
-              "../${PKG_DIR}/usr/bin/openhush" | sed 's/^shlibs:Depends=//')"
-
-          if [ -z "${SHLIB_DEPS}" ]; then
-              echo "dpkg-shlibdeps returned no dependencies" >&2
-              exit 1
-          fi
-          echo "Computed Depends: ${SHLIB_DEPS}"
-
-          # Create control file
-          cat > "${PKG_DIR}/DEBIAN/control" << EOF
-          Package: openhush
-          Version: ${VERSION}
-          Section: utils
-          Priority: optional
-          Architecture: amd64
-          Depends: ${SHLIB_DEPS}
-          Maintainer: OpenHush Team <christian.kamien@gmail.com>
-          Description: Voice-to-text transcription tool
-           OpenHush is a local, privacy-focused voice-to-text tool
-           that runs entirely on your machine using Whisper AI models.
-          EOF
-
-          # Create desktop entry
-          cat > "${PKG_DIR}/usr/share/applications/openhush.desktop" << EOF
-          [Desktop Entry]
-          Name=OpenHush
-          Comment=Voice-to-text transcription
-          Exec=openhush
-          Icon=openhush
-          Terminal=false
-          Type=Application
-          Categories=Utility;Audio;
-          EOF
-
-          # Copy license
-          cp LICENSE "${PKG_DIR}/usr/share/doc/openhush/copyright"
-
-          # Build package
-          fakeroot dpkg-deb --build "${PKG_DIR}"
-          mv "${PKG_DIR}.deb" "openhush-${{ github.ref_name }}-amd64.deb"
+          packaging/deb/build-deb.sh "${{ github.ref_name }}" artifact/openhush .
 
       - name: Upload .deb artifact
         uses: actions/upload-artifact@v7
@@ -330,69 +257,13 @@ jobs:
           lipo -create -output openhush x86_64/openhush aarch64/openhush
           chmod +x openhush
 
-      - name: Install create-dmg
-        run: brew list create-dmg &>/dev/null || brew install create-dmg
-
+      # Same reasoning as the .deb: one definition, in packaging/, runnable
+      # by hand. The inline copy this replaces had drifted from
+      # packaging/macos/build-dmg.sh, and it was the inline one that shipped —
+      # so a fix landed in the script while users kept getting the stale plist.
       - name: Build DMG
         run: |
-          VERSION="${{ github.ref_name }}"
-          VERSION="${VERSION#v}"
-
-          # Create app bundle
-          APP_DIR="OpenHush.app"
-          mkdir -p "${APP_DIR}/Contents/MacOS"
-          mkdir -p "${APP_DIR}/Contents/Resources"
-
-          cp openhush "${APP_DIR}/Contents/MacOS/"
-
-          # Create Info.plist
-          cat > "${APP_DIR}/Contents/Info.plist" << EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>CFBundleExecutable</key>
-              <string>openhush</string>
-              <key>CFBundleIdentifier</key>
-              <string>org.openhush.OpenHush</string>
-              <key>CFBundleName</key>
-              <string>OpenHush</string>
-              <key>CFBundleVersion</key>
-              <string>${VERSION}</string>
-              <key>CFBundleShortVersionString</key>
-              <string>${VERSION}</string>
-              <key>CFBundlePackageType</key>
-              <string>APPL</string>
-              <!-- The binary hard-links ScreenCaptureKit (LC_LOAD_DYLIB, not
-                   weak), so dyld refuses to start it where that framework is
-                   absent. It arrived in macOS 12.3, and the system audio
-                   capture built on it is documented as needing 13+. Claiming
-                   11.0 let the app install where it cannot launch. Keep in
-                   sync with packaging/macos/build-dmg.sh. -->
-              <key>LSMinimumSystemVersion</key>
-              <string>13.0</string>
-              <key>LSUIElement</key>
-              <true/>
-              <key>NSHighResolutionCapable</key>
-              <true/>
-              <key>NSMicrophoneUsageDescription</key>
-              <string>OpenHush needs microphone access for voice-to-text transcription.</string>
-              <!-- src/context.rs shells out to osascript to read the frontmost
-                   application. That sends Apple Events, and macOS terminates a
-                   bundled app that does so without this key. It was present in
-                   packaging/macos/build-dmg.sh but missing here, and this is
-                   the plist the release actually ships. -->
-              <key>NSAppleEventsUsageDescription</key>
-              <string>OpenHush needs to query the frontmost application to adapt transcription to its context.</string>
-          </dict>
-          </plist>
-          EOF
-
-          # Create DMG (simple method for unsigned builds)
-          hdiutil create -volname "OpenHush ${VERSION}" \
-              -srcfolder "${APP_DIR}" \
-              -ov -format UDZO \
-              "openhush-${{ github.ref_name }}-macos-universal.dmg"
+          packaging/macos/build-dmg.sh "${{ github.ref_name }}" openhush .
 
       - name: Upload .dmg artifact
         uses: actions/upload-artifact@v7
