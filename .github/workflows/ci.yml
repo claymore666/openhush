@@ -66,8 +66,13 @@ jobs:
       - name: Install cargo-deny
         run: cargo install cargo-deny
 
+      # --deny warnings makes a newly published advisory fail the build.
+      # Without it the job only failed on outright vulnerabilities, and
+      # RUSTSEC-2026-0258 had to be picked out of 11 unexplained warnings by
+      # hand. Everything we knowingly cannot act on is listed, with reasons,
+      # in .cargo/audit.toml.
       - name: Run cargo audit
-        run: cargo audit
+        run: cargo audit --deny warnings
 
       - name: Run cargo deny
         run: cargo deny check

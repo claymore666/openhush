@@ -8,11 +8,24 @@ db-urls = ["https://github.com/rustsec/advisory-db"]
 unmaintained = "workspace"
 # Yanked crates - warn but don't fail
 yanked = "warn"
-# Ignore known issues from transitive dependencies we can't easily replace
+# Ignored advisories.
+#
+# cargo-deny and cargo-audit read separate config files and apply different
+# policies, so they need different lists. `unmaintained = "workspace"` above
+# means cargo-deny only reports unmaintained crates that are direct
+# dependencies, so every unmaintained advisory we hit transitively is already
+# silent here and listing it would just be an unused entry -- the previous
+# "RUSTSEC-2024-0415" line was exactly that. cargo-audit has no such policy
+# knob and reports all of them, so .cargo/audit.toml carries the full list
+# with the reasoning for each. That file is the authority; this one only needs
+# what cargo-deny genuinely acts on.
 ignore = [
-    # gtk3-rs is unmaintained but required by tray-icon/libappindicator
-    "RUSTSEC-2024-0415",
-    # glib iterator unsoundness - upstream hasn't released fix compatible with gtk3
+    # glib VariantStrIter unsoundness. Reached through
+    # tray-icon -> muda/libappindicator -> gtk3 bindings. tray-icon is a
+    # Windows/macOS-only dependency here, so this code is never compiled on
+    # any target OpenHush ships, and upstream has no gtk3-compatible fix.
+    # Unlike the unmaintained notices, "unsound" is not filtered by the
+    # workspace policy, so this entry is load-bearing.
     "RUSTSEC-2024-0429",
 ]
 
