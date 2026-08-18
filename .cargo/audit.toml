@@ -1,0 +1,50 @@
+# cargo-audit configuration.
+#
+# CI runs `cargo audit --deny warnings`, so this file is the only thing
+# standing between a new advisory and a red build. That is deliberate: the
+# audit previously passed with 11 unexplained warnings scrolling past, and
+# RUSTSEC-2026-0258 (a real vulnerability in h2) had to be spotted by hand
+# among them. Anything not listed here now fails.
+#
+# Every entry below is an advisory we cannot act on, with the reason. None is
+# a vulnerability; all are `unmaintained` or `unsound` notices against crates
+# we reach transitively. Before adding an entry, try the upgrade first — the
+# h2 fix, dark-light 3.0 (dropped async-std) and ratatui 0.30 (moved lru off
+# the unsound 0.12.x) all came out of doing that. Add an entry only once you
+# have confirmed no released version fixes it, and say what you checked.
+#
+# Revisit when bumping tray-icon, egui/eframe or tokenizers.
+
+[advisories]
+ignore = [
+    # --- GTK3 bindings, all via tray-icon -> muda/libappindicator ---
+    #
+    # tray-icon is declared here only for Windows and macOS; GTK3 is its Linux
+    # backend, so none of these crates is compiled on any target OpenHush
+    # ships. They are in Cargo.lock, which is what cargo-audit reads.
+    #
+    # Checked against tray-icon 0.24.2 (current latest): it still depends on
+    # libappindicator and muda, which still use the GTK3 bindings. There is no
+    # version to upgrade to, so this stays until upstream moves to GTK4.
+    "RUSTSEC-2024-0412",  # gdk
+    "RUSTSEC-2024-0413",  # atk
+    "RUSTSEC-2024-0415",  # gtk
+    "RUSTSEC-2024-0416",  # atk-sys
+    "RUSTSEC-2024-0418",  # gdk-sys
+    "RUSTSEC-2024-0419",  # gtk3-macros
+    "RUSTSEC-2024-0420",  # gtk-sys
+    "RUSTSEC-2024-0429",  # glib VariantStrIter unsoundness, same tree
+    "RUSTSEC-2024-0370",  # proc-macro-error, via glib-macros, same tree
+
+    # --- paste: unmaintained proc-macro ---
+    # Reached through tokenizers. Present in 0.23.1 as well, so upgrading does
+    # not help; it has to be dropped upstream. Compile-time only.
+    "RUSTSEC-2024-0436",
+
+    # --- ttf-parser: unmaintained ---
+    # Reached through winit's Wayland client-side decorations
+    # (sctk-adwaita -> ab_glyph -> owned_ttf_parser), not through egui's text
+    # stack. Verified still present with eframe/egui 0.36.1, so the GUI
+    # upgrade does not clear it either.
+    "RUSTSEC-2026-0192",
+]

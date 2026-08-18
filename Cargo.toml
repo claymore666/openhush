@@ -98,7 +98,7 @@ anyhow = "1"
 chrono = "0.4"
 
 # System theme detection (dark mode)
-dark-light = "2.0"
+dark-light = "3.0"
 
 # Platform paths (XDG on Linux, native elsewhere)
 directories = "5"
@@ -112,7 +112,7 @@ eframe = "0.33"
 egui = "0.33"
 
 # TUI (terminal user interface)
-ratatui = "0.29"
+ratatui = "0.30"
 crossterm = "0.28"
 
 # Open files/URLs
