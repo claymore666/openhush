@@ -19,6 +19,14 @@ updates:
       # Ignore major version updates for stability (review manually)
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # ort is pinned exactly in Cargo.toml and cannot be bumped on its own.
+      # It is a pre-release that breaks its API between release candidates,
+      # and silero-vad-rust (6.2.1, its latest) requires "^2.0.0-rc.10" while
+      # only compiling against rc.10 itself. Cargo treats that caret range as
+      # allowing rc.13, so a bump resolves cleanly and then fails to build --
+      # entirely inside silero-vad-rust, not in our code. That is what PR #243
+      # was. Unignore this once silero-vad-rust supports a newer rc.
+      - dependency-name: "ort"
 
   - package-ecosystem: "github-actions"
     directory: "/"
