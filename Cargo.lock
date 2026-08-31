@@ -4477,9 +4477,9 @@ dependencies = [
 
 [[package]]
 name = "open"
-version = "5.4.1"
+version = "5.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9cfef937e9c486488c7e3d949ae31c0f1d06bdacd75b99c086cb35356e30408"
+checksum = "ade3be4664bc1ef537ce133015f04c176b737815c2ba9fd60edf212d6e90dd55"
 dependencies = [
  "is-wsl",
  "libc",
@@ -5960,9 +5960,9 @@ dependencies = [
 
 [[package]]
 name = "silero-vad-rust"
-version = "6.2.1"
+version = "6.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a8636fa2581063bb52f2cbe70148009763612fec05f4be365225df552868a92"
+checksum = "ded9fd35fe7afb3b267537db60cff244b3569dd4cff08e370e2c444854482cc4"
 dependencies = [
  "anyhow",
  "hound",
