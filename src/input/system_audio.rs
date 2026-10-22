@@ -410,11 +410,10 @@ fn run_capture_loop(
                 Ok(pulse::stream::PeekResult::Data(data)) => {
                     // Convert bytes to f32 samples
                     let float_samples: Vec<f32> = data
-                        .chunks_exact(4)
-                        .map(|chunk| {
-                            let bytes: [u8; 4] = chunk.try_into().unwrap();
-                            f32::from_le_bytes(bytes)
-                        })
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .map(|bytes| f32::from_le_bytes(*bytes))
                         .collect();
 
                     // Append to buffer
