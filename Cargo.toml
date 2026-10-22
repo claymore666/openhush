@@ -123,8 +123,8 @@ axum = "0.8"
 tower-http = { version = "0.6", features = ["cors", "trace"] }
 
 # OpenAPI / Swagger UI
-utoipa = { version = "5", features = ["axum_extras"] }
-utoipa-swagger-ui = { version = "9", features = ["axum"] }
+utoipa = { version = "6", features = ["axum_extras"] }
+utoipa-swagger-ui = { version = "10", features = ["axum"] }
 
 # API key hashing
 sha2 = "0.10"
@@ -153,7 +153,7 @@ windows-sys = { version = "0.59", features = ["Win32_System_Console", "Win32_UI_
 # Windows registry access for autostart
 winreg = "0.55"
 # Windows system audio capture (WASAPI loopback)
-wasapi = "0.22"
+wasapi = "0.26"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Cross-platform system tray

@@ -165,14 +165,10 @@ impl ChannelSelectorApp {
 
                     if selection.enabled {
                         if ui.button("Select All").clicked() {
-                            for ch in &mut selection.channels {
-                                *ch = true;
-                            }
+                            selection.channels.fill(true);
                         }
                         if ui.button("Deselect All").clicked() {
-                            for ch in &mut selection.channels {
-                                *ch = false;
-                            }
+                            selection.channels.fill(false);
                         }
                     }
                 });
